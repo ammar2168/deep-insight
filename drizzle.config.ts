@@ -8,5 +8,4 @@ export default {
 	dbCredentials: {
 		url: env.DATABASE_URL,
 	},
-	tablesFilter: ["journalling-app_*"],
 } satisfies Config;

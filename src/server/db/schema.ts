@@ -3,14 +3,11 @@ import {
 	boolean,
 	index,
 	pgTable,
-	pgTableCreator,
 	text,
 	timestamp,
 } from "drizzle-orm/pg-core";
 
-export const createTable = pgTableCreator((name) => `pg-drizzle_${name}`);
-
-export const posts = createTable(
+export const posts = pgTable(
 	"post",
 	(d) => ({
 		id: d.integer().primaryKey().generatedByDefaultAsIdentity(),
