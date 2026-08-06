@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { Entries } from "@/app/_components/entries";
 import { LatestPost } from "@/app/_components/post";
 import { auth } from "@/server/better-auth";
 import { getSession } from "@/server/better-auth/server";
@@ -13,6 +14,7 @@ export default async function Home() {
 
 	if (session) {
 		void api.post.getLatest.prefetch();
+		void api.entry.list.prefetch();
 	}
 
 	return (
@@ -97,7 +99,12 @@ export default async function Home() {
 						</div>
 					</div>
 
-					{session?.user && <LatestPost />}
+					{session?.user && (
+						<>
+							<LatestPost />
+							<Entries />
+						</>
+					)}
 				</div>
 			</main>
 		</HydrateClient>
