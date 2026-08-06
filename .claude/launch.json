@@ -1,11 +1,11 @@
 {
-  "version": "0.0.1",
-  "configurations": [
-    {
-      "name": "journalling-app-dev",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["run", "dev", "--", "-p", "3010"],
-      "port": 3010
-    }
-  ]
+	"version": "0.0.1",
+	"configurations": [
+		{
+			"name": "journalling-app-dev",
+			"runtimeExecutable": "pnpm",
+			"runtimeArgs": ["run", "dev", "-p", "3010"],
+			"port": 3010
+		}
+	]
 }
