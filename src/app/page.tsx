@@ -2,109 +2,177 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { Entries } from "@/app/_components/entries";
-import { LatestPost } from "@/app/_components/post";
+import { HomeInsights } from "@/app/_components/home-insights";
 import { auth } from "@/server/better-auth";
 import { getSession } from "@/server/better-auth/server";
 import { api, HydrateClient } from "@/trpc/server";
 
+function AddPageIcon() {
+	return (
+		<svg aria-hidden="true" height="20" viewBox="0 0 20 20" width="20">
+			<title>Add today&rsquo;s page</title>
+			<rect
+				height="14"
+				rx="1"
+				stroke="currentColor"
+				strokeWidth="1.4"
+				width="11"
+				x="4.5"
+				y="3"
+			/>
+			<path
+				d="M10 8 V13 M7.5 10.5 H12.5"
+				stroke="currentColor"
+				strokeLinecap="round"
+				strokeWidth="1.4"
+			/>
+		</svg>
+	);
+}
+
+function foldDiamond(cx: number, cy: number, s: number) {
+	return `M${cx} ${cy - s} L${cx + s} ${cy} L${cx} ${cy + s} L${cx - s} ${cy} Z`;
+}
+
+function HeroFoldMotif() {
+	return (
+		<svg
+			aria-hidden="true"
+			className="pointer-events-none absolute top-1/2 right-0 h-[340px] w-[340px] translate-x-1/4 -translate-y-1/2 sm:translate-x-1/6"
+			viewBox="0 0 340 340"
+		>
+			<title>Decorative fold motif</title>
+			<path
+				d={`M170 60 L170 280 M60 170 L280 170 M100 100 L240 240 M240 100 L100 240`}
+				stroke="var(--color-indigo-500)"
+				strokeOpacity="0.35"
+				strokeWidth="1"
+			/>
+			<path
+				d={foldDiamond(170, 170, 95)}
+				fill="none"
+				stroke="var(--color-indigo-400)"
+				strokeOpacity="0.4"
+				strokeWidth="1.5"
+			/>
+			<path
+				d={foldDiamond(170, 170, 55)}
+				fill="none"
+				stroke="var(--color-indigo-400)"
+				strokeOpacity="0.55"
+				strokeWidth="1.5"
+			/>
+			<path
+				d={foldDiamond(170, 170, 22)}
+				fill="var(--color-gold-500)"
+				stroke="var(--color-gold-500)"
+				strokeWidth="1.5"
+			/>
+		</svg>
+	);
+}
+
 export default async function Home() {
-	const hello = await api.post.hello({ text: "from tRPC" });
 	const session = await getSession();
 
-	if (session) {
-		void api.post.getLatest.prefetch();
-		void api.entry.list.prefetch();
+	if (!session) {
+		return (
+			<main
+				className="relative flex min-h-screen items-center justify-center bg-indigo-700 px-6 py-16 text-paper-100"
+				style={{
+					backgroundImage:
+						"repeating-linear-gradient(115deg, var(--color-crease) 0px, var(--color-crease) 1px, transparent 1px, transparent 96px)",
+				}}
+			>
+				<div className="flex w-full max-w-sm flex-col items-center gap-6 rounded-sm bg-paper-100 p-8 text-center shadow-[0_18px_40px_-24px_rgba(0,0,0,0.6)]">
+					<p className="font-mono text-ink-600 text-xs uppercase tracking-[0.2em]">
+						One entry, one date
+					</p>
+					<h1 className="font-semibold text-2xl text-ink-900">
+						Handwritten pages, folded into insight
+					</h1>
+					<p className="text-ink-600 text-sm">
+						Photograph a page from your journal and we&rsquo;ll surface what it
+						says about your mood, sleep, and progress over time.
+					</p>
+					<form className="w-full">
+						<button
+							className="w-full rounded-full bg-indigo-600 px-6 py-3 font-medium text-paper-100 text-sm transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
+							formAction={async () => {
+								"use server";
+								const res = await auth.api.signInSocial({
+									body: {
+										provider: "github",
+										callbackURL: "/",
+									},
+								});
+								if (!res.url) {
+									throw new Error("No URL returned from signInSocial");
+								}
+								redirect(res.url);
+							}}
+							type="submit"
+						>
+							Sign in with GitHub
+						</button>
+					</form>
+				</div>
+			</main>
+		);
 	}
+
+	void api.insight.latest.prefetch();
 
 	return (
 		<HydrateClient>
-			<main className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-[#2e026d] to-[#15162c] text-white">
-				<div className="container flex flex-col items-center justify-center gap-12 px-4 py-16">
-					<h1 className="font-extrabold text-5xl tracking-tight sm:text-[5rem]">
-						Create <span className="text-[hsl(280,100%,70%)]">T3</span> App
-					</h1>
-					<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:gap-8">
-						<Link
-							className="flex max-w-xs flex-col gap-4 rounded-xl bg-white/10 p-4 hover:bg-white/20"
-							href="https://create.t3.gg/en/usage/first-steps"
-							target="_blank"
-						>
-							<h3 className="font-bold text-2xl">First Steps →</h3>
-							<div className="text-lg">
-								Just the basics - Everything you need to know to set up your
-								database and authentication.
+			<main
+				className="relative min-h-screen bg-indigo-700 text-paper-100"
+				style={{
+					backgroundImage:
+						"repeating-linear-gradient(115deg, var(--color-crease) 0px, var(--color-crease) 1px, transparent 1px, transparent 96px)",
+				}}
+			>
+				<div className="mx-auto flex max-w-3xl flex-col gap-8 px-6 py-12 sm:px-10 sm:py-16">
+					<section className="relative animate-[fold-in_0.5s_ease-out] overflow-hidden rounded-sm border-indigo-500 border-b pb-8 motion-reduce:animate-none">
+						<HeroFoldMotif />
+						<header className="relative flex items-start justify-between gap-4">
+							<div>
+								<p className="font-mono text-indigo-400 text-xs uppercase tracking-[0.2em]">
+									Since you last opened this
+								</p>
+								<h1 className="mt-1 font-bold text-3xl text-paper-100 leading-tight sm:text-4xl">
+									{session.user?.name
+										? `Hi ${session.user.name.split(" ")[0]}`
+										: "Hi there"}
+								</h1>
 							</div>
-						</Link>
+							<form className="shrink-0">
+								<button
+									className="whitespace-nowrap text-indigo-400 text-sm underline decoration-indigo-500/40 underline-offset-4 hover:text-paper-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
+									formAction={async () => {
+										"use server";
+										await auth.api.signOut({
+											headers: await headers(),
+										});
+										redirect("/");
+									}}
+									type="submit"
+								>
+									Sign out
+								</button>
+							</form>
+						</header>
+
 						<Link
-							className="flex max-w-xs flex-col gap-4 rounded-xl bg-white/10 p-4 hover:bg-white/20"
-							href="https://create.t3.gg/en/introduction"
-							target="_blank"
+							className="relative mt-6 inline-flex items-center justify-center gap-2 rounded-full bg-indigo-600 px-7 py-4 font-medium text-lg text-paper-100 shadow-[0_14px_30px_-16px_rgba(0,0,0,0.7)] transition-all hover:-translate-y-0.5 hover:bg-indigo-500 hover:shadow-[0_18px_36px_-14px_rgba(0,0,0,0.75)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2 active:translate-y-0"
+							href="/capture"
 						>
-							<h3 className="font-bold text-2xl">Documentation →</h3>
-							<div className="text-lg">
-								Learn more about Create T3 App, the libraries it uses, and how
-								to deploy it.
-							</div>
+							<AddPageIcon />
+							Add today&rsquo;s page
 						</Link>
-					</div>
-					<div className="flex flex-col items-center gap-2">
-						<p className="text-2xl text-white">
-							{hello ? hello.greeting : "Loading tRPC query..."}
-						</p>
+					</section>
 
-						<div className="flex flex-col items-center justify-center gap-4">
-							<p className="text-center text-2xl text-white">
-								{session && <span>Logged in as {session.user?.name}</span>}
-							</p>
-							{!session ? (
-								<form>
-									<button
-										className="rounded-full bg-white/10 px-10 py-3 font-semibold no-underline transition hover:bg-white/20"
-										formAction={async () => {
-											"use server";
-											const res = await auth.api.signInSocial({
-												body: {
-													provider: "github",
-													callbackURL: "/",
-												},
-											});
-											if (!res.url) {
-												throw new Error("No URL returned from signInSocial");
-											}
-											redirect(res.url);
-										}}
-										type="submit"
-									>
-										Sign in with Github
-									</button>
-								</form>
-							) : (
-								<form>
-									<button
-										className="rounded-full bg-white/10 px-10 py-3 font-semibold no-underline transition hover:bg-white/20"
-										formAction={async () => {
-											"use server";
-											await auth.api.signOut({
-												headers: await headers(),
-											});
-											redirect("/");
-										}}
-										type="submit"
-									>
-										Sign out
-									</button>
-								</form>
-							)}
-						</div>
-					</div>
-
-					{session?.user && (
-						<>
-							<LatestPost />
-							<Entries />
-						</>
-					)}
+					<HomeInsights />
 				</div>
 			</main>
 		</HydrateClient>

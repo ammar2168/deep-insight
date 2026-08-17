@@ -1,4 +1,6 @@
+import { chatRouter } from "@/server/api/routers/chat";
 import { entryRouter } from "@/server/api/routers/entry";
+import { insightRouter } from "@/server/api/routers/insight";
 import { postRouter } from "@/server/api/routers/post";
 import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
 
@@ -10,6 +12,8 @@ import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
 export const appRouter = createTRPCRouter({
 	post: postRouter,
 	entry: entryRouter,
+	insight: insightRouter,
+	chat: chatRouter,
 });
 
 // export type definition of API

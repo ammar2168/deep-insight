@@ -15,6 +15,9 @@ export const env = createEnv({
 		BETTER_AUTH_GITHUB_CLIENT_ID: z.string(),
 		BETTER_AUTH_GITHUB_CLIENT_SECRET: z.string(),
 		DATABASE_URL: z.string().url(),
+		// Optional so the app still boots without it; routes that need Claude throw a clear
+		// error at call time instead of failing the whole app at startup.
+		ANTHROPIC_API_KEY: z.string().optional(),
 		NODE_ENV: z
 			.enum(["development", "test", "production"])
 			.default("development"),
@@ -40,6 +43,7 @@ export const env = createEnv({
 		BETTER_AUTH_GITHUB_CLIENT_SECRET:
 			process.env.BETTER_AUTH_GITHUB_CLIENT_SECRET,
 		DATABASE_URL: process.env.DATABASE_URL,
+		ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
 		NODE_ENV: process.env.NODE_ENV,
 	},
 	/**

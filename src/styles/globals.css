@@ -2,6 +2,32 @@
 
 @theme {
 	--font-sans:
-		var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif,
+		var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif,
 		"Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+	--font-mono: var(--font-plex-mono), ui-monospace, "SFMono-Regular", monospace;
+
+	/* Orizuru fold-sequence world: aizome indigo-washi ground, paper working surface, sumi ink, gold lock accent */
+	--color-indigo-900: #16232c;
+	--color-indigo-700: #223648;
+	--color-indigo-600: #2c4658;
+	--color-indigo-500: #3f5f74;
+	--color-indigo-400: #8fb0bf;
+	--color-paper-100: #faf4e8;
+	--color-paper-200: #f2e8d5;
+	--color-paper-300: #e4d5b8;
+	--color-ink-900: #241a13;
+	--color-ink-600: #5a4a3c;
+	--color-gold-500: #c99a3c;
+	--color-crease: rgb(250 244 232 / 0.14);
+}
+
+@keyframes fold-in {
+	from {
+		opacity: 0;
+		transform: translateY(10px) scale(0.98);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+	}
 }

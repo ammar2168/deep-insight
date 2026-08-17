@@ -44,3 +44,11 @@ yarn-error.log*
 
 # idea files
 .idea
+
+# claude code local settings (personal machine, not shared)
+.claude/settings.local.json
+
+# impeccable: personal/local state, not shared project config
+.impeccable/config.local.json
+.impeccable/hook.cache.json
+.impeccable/questions/
