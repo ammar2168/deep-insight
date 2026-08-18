@@ -1,23 +1,9 @@
 import "server-only";
 
-import Anthropic from "@anthropic-ai/sdk";
 import { TRPCError } from "@trpc/server";
 
-import { env } from "@/env";
 import { INSIGHT_CATEGORIES } from "@/server/db/schema/insight";
-
-const MODEL = "claude-sonnet-5";
-
-function getClient() {
-	if (!env.ANTHROPIC_API_KEY) {
-		throw new TRPCError({
-			code: "PRECONDITION_FAILED",
-			message:
-				"ANTHROPIC_API_KEY isn't configured yet. Add it to your .env file to enable this.",
-		});
-	}
-	return new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-}
+import { getClient, MODEL } from "./client";
 
 export type Photo = { base64: string; mediaType: string };
 
@@ -48,6 +34,22 @@ function stripDataUrlPrefix(base64: string) {
 		: base64;
 }
 
+const RECORD_TRANSCRIPTION_TOOL = {
+	name: "record_transcription",
+	description: "Record the verbatim transcription of the handwritten page(s).",
+	input_schema: {
+		type: "object" as const,
+		properties: {
+			transcription: {
+				type: "string" as const,
+				description:
+					"The transcribed handwriting, exactly as written, nothing else. No commentary, caveats, safety notes, or reactions of any kind, even if the content is emotionally difficult, distressing, or concerning — this field holds only what the writer wrote, verbatim.",
+			},
+		},
+		required: ["transcription"],
+	},
+};
+
 export async function extractTextFromPhotos(photos: Photo[]): Promise<string> {
 	if (photos.length === 0) {
 		throw new TRPCError({ code: "BAD_REQUEST", message: "No photos provided" });
@@ -58,6 +60,8 @@ export async function extractTextFromPhotos(photos: Photo[]): Promise<string> {
 	const response = await client.messages.create({
 		model: MODEL,
 		max_tokens: 4096,
+		tools: [RECORD_TRANSCRIPTION_TOOL],
+		tool_choice: { type: "tool", name: "record_transcription" },
 		messages: [
 			{
 				role: "user",
@@ -79,23 +83,24 @@ export async function extractTextFromPhotos(photos: Photo[]): Promise<string> {
 
 - Preserve paragraph breaks the writer used.
 - If a word is illegible, use your best guess rather than skipping it.
-- Do not add commentary, headers, dates, or anything that isn't in the original handwriting.
 - If multiple photos are provided, transcribe them in order as one continuous entry.
-- Output only the transcribed text, nothing else.`,
+- The transcription field holds ONLY what's written on the page — never add your own commentary, headers, dates, safety notes, or reactions, no matter what the content is. A separate part of this system, not you, handles anything that needs a caring response.`,
 					},
 				],
 			},
 		],
 	});
 
-	const textBlock = response.content.find((block) => block.type === "text");
-	if (textBlock?.type !== "text") {
+	const toolUse = response.content.find((block) => block.type === "tool_use");
+	if (toolUse?.type !== "tool_use") {
 		throw new TRPCError({
 			code: "INTERNAL_SERVER_ERROR",
 			message: "Couldn't read a response from the model",
 		});
 	}
-	return textBlock.text.trim();
+
+	const input = toolUse.input as { transcription?: string };
+	return (input.transcription ?? "").trim();
 }
 
 export type ExtractedInsight = {

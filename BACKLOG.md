@@ -18,6 +18,12 @@ Working list of known gaps and deferred decisions. Not prioritized/estimated yet
 - **No persistence.** Conversations live in local component state only — lost on refresh or navigating away. Whether to persist/resume conversations is a real product decision, not assumed.
 - **`?q=` auto-ask from home.** Typing a question on home and hitting Ask navigates to `/chat` and auto-submits immediately. Worth revisiting whether that's the right feel now that real answers come back (vs. requiring a second confirmation on the chat page).
 
+## Safety
+
+- **Crisis screening covers entry text and chat questions, not chat answers.** `checkForCrisisSignal` runs on OCR'd entry text (`entry.extractText`) and chat questions (`chat.ask`) before the user sees them. It does not screen what the model itself generates in an answer — low risk given the system prompt's constraints, but not verified either way. Revisit if it ever seems necessary.
+- **Crisis screening runs once per entry, not on edits.** If a user's stage-2 text edit introduces new crisis language after the OCR check already passed, it won't be re-screened before save. Low-probability edge case, deliberately not built.
+- ~~**No crisis-language guardrail on capture/OCR text.**~~ Fixed 2026-08-14 — see `CrisisCheckInModal` / `checkForCrisisSignal`. A real user upload surfaced this as a live bug (the OCR model injected its own safety commentary into the transcription, and even clean transcriptions had nowhere to route flagged content); root-caused and fixed same day.
+
 ## Other
 
 - **Signed-out landing page** is intentionally minimal (one card, one sentence, sign-in button) — never got a real Persuade-mode pass. Fine for now since this is a personal-use-first product, revisit if/when it's meant for strangers.

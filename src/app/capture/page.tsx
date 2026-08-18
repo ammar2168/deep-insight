@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useId, useState } from "react";
+import { CrisisCheckInModal } from "@/app/_components/crisis-check-in-modal";
 import type { RouterOutputs } from "@/trpc/react";
 import { api } from "@/trpc/react";
 
@@ -193,6 +194,7 @@ export default function CapturePage() {
 		string | null
 	>(null);
 	const [saveError, setSaveError] = useState<string | null>(null);
+	const [crisisCheckIn, setCrisisCheckIn] = useState(false);
 	const uploadInputId = useId();
 
 	const utils = api.useUtils();
@@ -247,7 +249,13 @@ export default function CapturePage() {
 				photos: photoInputs,
 			});
 			setEntryText(result.text);
-			setStageIndex(1);
+			if (result.crisis) {
+				// Pause here instead of dropping the user straight into an editable box
+				// holding their own words back at them; they advance once they continue.
+				setCrisisCheckIn(true);
+			} else {
+				setStageIndex(1);
+			}
 		} catch (err) {
 			// OCR failure still moves forward to manual entry, per product rule: never a dead end.
 			setExtractTextError(
@@ -283,6 +291,11 @@ export default function CapturePage() {
 		}
 	}
 
+	function handleCrisisContinue() {
+		setCrisisCheckIn(false);
+		setStageIndex(1);
+	}
+
 	function discardInsight(id: string) {
 		setInsights((prev) => prev.filter((i) => i.id !== id));
 		setConfirmingDiscardId(null);
@@ -315,6 +328,10 @@ export default function CapturePage() {
 					"repeating-linear-gradient(115deg, var(--color-crease) 0px, var(--color-crease) 1px, transparent 1px, transparent 96px)",
 			}}
 		>
+			{crisisCheckIn && (
+				<CrisisCheckInModal onContinue={handleCrisisContinue} />
+			)}
+
 			<div className="mx-auto flex max-w-5xl flex-col gap-6 px-6 py-12 sm:px-10 sm:py-16">
 				<Link
 					className="inline-flex w-fit items-center gap-1.5 text-indigo-400 text-sm underline decoration-indigo-500/40 underline-offset-4 hover:text-paper-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"

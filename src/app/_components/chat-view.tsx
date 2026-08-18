@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import Markdown from "react-markdown";
 
+import { CrisisCheckInModal } from "@/app/_components/crisis-check-in-modal";
 import { api } from "@/trpc/react";
 
 type Message = {
@@ -122,6 +123,7 @@ export function ChatView() {
 	const askInputId = useId();
 	const [question, setQuestion] = useState("");
 	const [messages, setMessages] = useState<Message[]>([]);
+	const [crisisCheckIn, setCrisisCheckIn] = useState(false);
 	const consumedInitialQuery = useRef(false);
 	const askMutation = api.chat.ask.useMutation();
 
@@ -142,6 +144,13 @@ export function ChatView() {
 
 		try {
 			const result = await askMutation.mutateAsync({ question: q, history });
+			if (result.crisis) {
+				// Don't leave the question sitting in the transcript for them to see
+				// again — show the check-in instead, nothing about it stays on screen.
+				setMessages((prev) => prev.filter((m) => m.id !== id));
+				setCrisisCheckIn(true);
+				return;
+			}
 			setMessages((prev) =>
 				prev.map((m) => (m.id === id ? { ...m, answer: result.answer } : m)),
 			);
@@ -178,6 +187,10 @@ export function ChatView() {
 					"repeating-linear-gradient(115deg, var(--color-crease) 0px, var(--color-crease) 1px, transparent 1px, transparent 96px)",
 			}}
 		>
+			{crisisCheckIn && (
+				<CrisisCheckInModal onContinue={() => setCrisisCheckIn(false)} />
+			)}
+
 			<div className="mx-auto flex max-w-2xl flex-col gap-6 px-6 py-12 sm:px-10 sm:py-16">
 				<header className="flex flex-col gap-3">
 					<Link

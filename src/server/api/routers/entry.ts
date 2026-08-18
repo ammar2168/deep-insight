@@ -6,6 +6,7 @@ import {
 	extractInsightsFromText,
 	extractTextFromPhotos,
 } from "@/server/ai/insights";
+import { checkForCrisisSignal } from "@/server/ai/safety";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { entries, INSIGHT_CATEGORIES, insights } from "@/server/db/schema";
 
@@ -28,11 +29,23 @@ export const entryRouter = createTRPCRouter({
 		});
 	}),
 
-	/** Stage 1 -> 2: OCR the uploaded photo(s) into raw entry text. */
+	/**
+	 * Stage 1 -> 2: OCR the uploaded photo(s) into raw entry text. Also screens the
+	 * result for crisis language before the client ever shows it in an editable field —
+	 * the client shows CrisisCheckInModal first when `crisis` is true, and only advances
+	 * to stage 2 once the user continues past it.
+	 */
 	extractText: protectedProcedure
 		.input(z.object({ photos: z.array(photoInput).min(1).max(10) }))
-		.mutation(async ({ input }) => {
-			return { text: await extractTextFromPhotos(input.photos) };
+		.mutation(async ({ ctx, input }) => {
+			const text = await extractTextFromPhotos(input.photos);
+			const crisis = await checkForCrisisSignal(text);
+			if (crisis) {
+				console.warn(
+					`[safety] crisis signal flagged in entry.extractText for user ${ctx.session.user.id}`,
+				);
+			}
+			return { text, crisis };
 		}),
 
 	/** Stage 2 -> 3: extract discrete insights from the (possibly hand-edited) entry text. */
