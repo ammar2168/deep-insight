@@ -1,7 +1,8 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { entries, insights } from "@/server/db/schema";
+import { rankInsights } from "@/server/insights/priority";
 
 export const insightRouter = createTRPCRouter({
 	/** The insights belonging to the user's single most recent entry, capped by construction. */
@@ -13,11 +14,11 @@ export const insightRouter = createTRPCRouter({
 
 		if (!latestEntry) return [];
 
-		// Ascending id = extraction order = the order the user reviewed and kept them in;
-		// the home surface treats the first one as the "lead" insight.
-		return ctx.db.query.insights.findMany({
+		const rows = await ctx.db.query.insights.findMany({
 			where: eq(insights.entryId, latestEntry.id),
-			orderBy: asc(insights.id),
 		});
+
+		// Category priority decides the "lead" insight now, not extraction order.
+		return rankInsights(rows);
 	}),
 });
