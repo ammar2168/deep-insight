@@ -24,12 +24,24 @@ type Photo = { id: string; name: string; url: string; file: File };
 type ExtractedInsight =
 	RouterOutputs["entry"]["extractInsights"]["insights"][number];
 
+type Category = ExtractedInsight["category"];
+
 type Insight = {
 	id: string;
-	category: ExtractedInsight["category"];
+	category: Category;
 	label: string;
 	value: string;
 };
+
+const CATEGORY_OPTIONS: { value: Category; label: string }[] = [
+	{ value: "mood", label: "Mood" },
+	{ value: "health", label: "Health" },
+	{ value: "goal", label: "Goal" },
+	{ value: "sleep", label: "Sleep" },
+	{ value: "relationships", label: "Relationships" },
+	{ value: "movement", label: "Movement" },
+	{ value: "other", label: "Other" },
+];
 
 function fileToDataUrl(file: File): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -161,6 +173,21 @@ function BackIcon() {
 	);
 }
 
+function AddIcon() {
+	return (
+		<svg aria-hidden="true" height="16" viewBox="0 0 16 16" width="16">
+			<title>Add an insight</title>
+			<path
+				d="M8 2.5 V13.5 M2.5 8 H13.5"
+				fill="none"
+				stroke="currentColor"
+				strokeLinecap="round"
+				strokeWidth="1.5"
+			/>
+		</svg>
+	);
+}
+
 function DiscardIcon() {
 	return (
 		<svg aria-hidden="true" height="16" viewBox="0 0 16 16" width="16">
@@ -195,7 +222,14 @@ export default function CapturePage() {
 	>(null);
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [crisisCheckIn, setCrisisCheckIn] = useState(false);
+	const [addingInsight, setAddingInsight] = useState(false);
+	const [newCategory, setNewCategory] = useState<Category>("mood");
+	const [newLabel, setNewLabel] = useState("");
+	const [newValue, setNewValue] = useState("");
 	const uploadInputId = useId();
+	const newCategoryId = useId();
+	const newLabelId = useId();
+	const newValueId = useId();
 
 	const utils = api.useUtils();
 	const extractTextMutation = api.entry.extractText.useMutation();
@@ -299,6 +333,27 @@ export default function CapturePage() {
 	function discardInsight(id: string) {
 		setInsights((prev) => prev.filter((i) => i.id !== id));
 		setConfirmingDiscardId(null);
+	}
+
+	function cancelAddInsight() {
+		setAddingInsight(false);
+		setNewCategory("mood");
+		setNewLabel("");
+		setNewValue("");
+	}
+
+	function handleAddInsight() {
+		if (!newLabel.trim() || !newValue.trim()) return;
+		setInsights((prev) => [
+			...prev,
+			{
+				id: crypto.randomUUID(),
+				category: newCategory,
+				label: newLabel.trim(),
+				value: newValue.trim(),
+			},
+		]);
+		cancelAddInsight();
 	}
 
 	async function handleSave() {
@@ -568,11 +623,6 @@ export default function CapturePage() {
 											Back to your insights
 										</Link>
 									</div>
-								) : insights.length === 0 ? (
-									<p className="text-ink-600 text-sm italic">
-										No insights left to save. Go back and add photos again to
-										try once more.
-									</p>
 								) : (
 									<>
 										{saveError && (
@@ -581,58 +631,155 @@ export default function CapturePage() {
 											</p>
 										)}
 
-										<ul className="flex flex-col gap-3">
-											{insights.map((insight) =>
-												confirmingDiscardId === insight.id ? (
-													<li
-														className="flex items-center justify-between gap-4 rounded-sm border border-indigo-500/40 bg-paper-200 p-4"
-														key={insight.id}
-													>
-														<p className="font-medium text-ink-900 text-sm">
-															Remove &ldquo;{insight.label}&rdquo;?
-														</p>
-														<div className="flex shrink-0 gap-2">
-															<button
-																className="rounded-full px-3 py-1.5 font-medium text-ink-600 text-xs transition-colors hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
-																onClick={() => setConfirmingDiscardId(null)}
-																type="button"
-															>
-																Keep
-															</button>
-															<button
-																className="rounded-full bg-indigo-600 px-3 py-1.5 font-medium text-paper-100 text-xs transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
-																onClick={() => discardInsight(insight.id)}
-																type="button"
-															>
-																Remove
-															</button>
-														</div>
-													</li>
-												) : (
-													<li
-														className="flex items-start justify-between gap-4 rounded-sm border border-indigo-500/20 bg-paper-200 p-4 transition-colors"
-														key={insight.id}
-													>
-														<div>
-															<p className="font-medium text-ink-900 text-sm">
-																{insight.label}
-															</p>
-															<p className="text-ink-600 text-sm">
-																{insight.value}
-															</p>
-														</div>
-														<button
-															aria-label={`Discard ${insight.label} insight`}
-															className="shrink-0 rounded-sm border border-indigo-500/40 p-2 text-ink-600 transition-colors hover:border-indigo-500 hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
-															onClick={() => setConfirmingDiscardId(insight.id)}
-															type="button"
+										{insights.length === 0 ? (
+											<p className="text-ink-600 text-sm italic">
+												No insights yet — go back and try again, or add one
+												yourself below.
+											</p>
+										) : (
+											<ul className="flex flex-col gap-3">
+												{insights.map((insight) =>
+													confirmingDiscardId === insight.id ? (
+														<li
+															className="flex items-center justify-between gap-4 rounded-sm border border-indigo-500/40 bg-paper-200 p-4"
+															key={insight.id}
 														>
-															<DiscardIcon />
-														</button>
-													</li>
-												),
-											)}
-										</ul>
+															<p className="font-medium text-ink-900 text-sm">
+																Remove &ldquo;{insight.label}&rdquo;?
+															</p>
+															<div className="flex shrink-0 gap-2">
+																<button
+																	className="rounded-full px-3 py-1.5 font-medium text-ink-600 text-xs transition-colors hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
+																	onClick={() => setConfirmingDiscardId(null)}
+																	type="button"
+																>
+																	Keep
+																</button>
+																<button
+																	className="rounded-full bg-indigo-600 px-3 py-1.5 font-medium text-paper-100 text-xs transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
+																	onClick={() => discardInsight(insight.id)}
+																	type="button"
+																>
+																	Remove
+																</button>
+															</div>
+														</li>
+													) : (
+														<li
+															className="flex items-start justify-between gap-4 rounded-sm border border-indigo-500/20 bg-paper-200 p-4 transition-colors"
+															key={insight.id}
+														>
+															<div>
+																<p className="font-medium text-ink-900 text-sm">
+																	{insight.label}
+																</p>
+																<p className="text-ink-600 text-sm">
+																	{insight.value}
+																</p>
+															</div>
+															<button
+																aria-label={`Discard ${insight.label} insight`}
+																className="shrink-0 rounded-sm border border-indigo-500/40 p-2 text-ink-600 transition-colors hover:border-indigo-500 hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
+																onClick={() =>
+																	setConfirmingDiscardId(insight.id)
+																}
+																type="button"
+															>
+																<DiscardIcon />
+															</button>
+														</li>
+													),
+												)}
+											</ul>
+										)}
+
+										{addingInsight ? (
+											<div className="flex flex-col gap-3 rounded-sm border border-indigo-500/40 bg-paper-200 p-4">
+												<div className="flex flex-col gap-1">
+													<label
+														className="font-mono text-[11px] text-ink-600 uppercase tracking-wide"
+														htmlFor={newCategoryId}
+													>
+														Category
+													</label>
+													<select
+														className="rounded-sm border border-indigo-500/20 bg-paper-100 px-3 py-2 text-[15px] text-ink-900 transition-colors focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+														id={newCategoryId}
+														onChange={(e) =>
+															setNewCategory(e.target.value as Category)
+														}
+														value={newCategory}
+													>
+														{CATEGORY_OPTIONS.map((opt) => (
+															<option key={opt.value} value={opt.value}>
+																{opt.label}
+															</option>
+														))}
+													</select>
+												</div>
+												<div className="flex flex-col gap-1">
+													<label
+														className="font-mono text-[11px] text-ink-600 uppercase tracking-wide"
+														htmlFor={newLabelId}
+													>
+														Label
+													</label>
+													<input
+														className="rounded-sm border border-indigo-500/20 bg-paper-100 px-3 py-2 text-[15px] text-ink-900 transition-colors placeholder:text-ink-600/60 focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+														id={newLabelId}
+														onChange={(e) => setNewLabel(e.target.value)}
+														placeholder="e.g. Mood, or Goal: Marlowe project"
+														type="text"
+														value={newLabel}
+													/>
+												</div>
+												<div className="flex flex-col gap-1">
+													<label
+														className="font-mono text-[11px] text-ink-600 uppercase tracking-wide"
+														htmlFor={newValueId}
+													>
+														What did you notice?
+													</label>
+													<input
+														className="rounded-sm border border-indigo-500/20 bg-paper-100 px-3 py-2 text-[15px] text-ink-900 transition-colors placeholder:text-ink-600/60 focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+														id={newValueId}
+														onChange={(e) => setNewValue(e.target.value)}
+														placeholder="One sentence is plenty"
+														type="text"
+														value={newValue}
+													/>
+												</div>
+												<div className="flex justify-end gap-2">
+													<button
+														className="rounded-full px-3 py-1.5 font-medium text-ink-600 text-xs transition-colors hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
+														onClick={cancelAddInsight}
+														type="button"
+													>
+														Cancel
+													</button>
+													<button
+														className="rounded-full bg-indigo-600 px-3 py-1.5 font-medium text-paper-100 text-xs transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+														disabled={
+															newLabel.trim().length === 0 ||
+															newValue.trim().length === 0
+														}
+														onClick={handleAddInsight}
+														type="button"
+													>
+														Add
+													</button>
+												</div>
+											</div>
+										) : (
+											<button
+												className="flex items-center justify-center gap-2 rounded-sm border border-indigo-500/40 border-dashed px-4 py-3 text-center text-ink-600 text-sm transition-colors hover:border-indigo-500 hover:bg-paper-200"
+												onClick={() => setAddingInsight(true)}
+												type="button"
+											>
+												<AddIcon />
+												Add an insight
+											</button>
+										)}
 
 										<div className="flex items-center justify-between">
 											<button
@@ -644,7 +791,9 @@ export default function CapturePage() {
 											</button>
 											<button
 												className="inline-flex items-center gap-2 rounded-sm bg-gold-500 px-5 py-2.5 font-medium text-ink-900 text-sm transition-colors hover:bg-gold-500/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-900 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
-												disabled={saveMutation.isPending}
+												disabled={
+													saveMutation.isPending || insights.length === 0
+												}
 												onClick={handleSave}
 												type="button"
 											>

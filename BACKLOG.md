@@ -6,13 +6,10 @@ Working list of known gaps and deferred decisions. Not prioritized/estimated yet
 
 - ~~**Proper insight prioritization logic.**~~ Minimal version shipped 2026-08-15 — `rankInsights` (src/server/insights/priority.ts) orders by a fixed category priority (`mood > health > goal > sleep > relationships > movement > other`), recency as tie-break within a category. Deliberately a pure function taking the priority order as a parameter, not a hardcoded default baked into the sort — that's the seam for the next step.
 - **Onboarding priority questionnaire + settings.** The real next step for prioritization: ask the user their priorities at signup (which of mood/sleep/goals/etc. matters most to them) and store it per-user, then pass that into `rankInsights` instead of `DEFAULT_CATEGORY_PRIORITY`. Add a settings page to edit it later. Not built yet — the current static ranking exists specifically so this is a call-site change (swap the priority-order argument) rather than a rewrite of the ranking logic.
-- **Manual insight adding.** No way to add an insight the extraction missed. Recommended scope (from prior discussion, not yet greenlit): allow adding one at the pre-save review stage in `/capture` only, not editing already-saved entries.
+- ~~**Manual insight adding.**~~ Shipped 2026-08-19 — an "Add an insight" affordance on `/capture` stage 3 (category select + label + value), scoped exactly as discussed: pre-save review only, no editing of already-saved entries. Also fixed a related dead end while in there: the empty-insights state previously had no way forward ("go back and add photos again"); now the same add-insight form is the escape hatch, and Save entry is disabled until at least one insight exists (extracted or added).
+- **Multi-photo reordering — reconsidered, not pursuing.** Considered building drag-to-reorder for photos before OCR, then realized it doesn't matter: all photos in one session combine into one entry, insights get extracted from the whole text, and insight *display* order is fully decided by category-priority ranking, independent of photo/paragraph order. Entries themselves are never shown to the user, so there's no visible payoff. Not building this.
 - **Undo after discard.** Confirm-before-delete exists on insight discard in `/capture`; undo does not. Deferred on purpose.
 - **Insight history beyond "latest."** Home only shows the most recent entry's insights, capped, no pagination. PRODUCT.md's future RAG/knowledge-base layer will probably want to expose deeper history browsing — that's a separate surface decision when the time comes.
-
-## Capture flow
-
-- **Multi-photo reordering.** You can remove a photo before extraction but not reorder the set.
 
 ## Chat
 
