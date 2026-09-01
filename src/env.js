@@ -18,6 +18,10 @@ export const env = createEnv({
 		// Optional so the app still boots without it; routes that need Claude throw a clear
 		// error at call time instead of failing the whole app at startup.
 		ANTHROPIC_API_KEY: z.string().optional(),
+		// Base64-encoded 32-byte AES-256 key. Wraps each user's own per-user encryption
+		// key — never used to encrypt entry content directly. Optional for the same
+		// reason as ANTHROPIC_API_KEY: routes that need it fail clearly at call time.
+		MASTER_ENCRYPTION_KEY: z.string().optional(),
 		NODE_ENV: z
 			.enum(["development", "test", "production"])
 			.default("development"),
@@ -44,6 +48,7 @@ export const env = createEnv({
 			process.env.BETTER_AUTH_GITHUB_CLIENT_SECRET,
 		DATABASE_URL: process.env.DATABASE_URL,
 		ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+		MASTER_ENCRYPTION_KEY: process.env.MASTER_ENCRYPTION_KEY,
 		NODE_ENV: process.env.NODE_ENV,
 	},
 	/**

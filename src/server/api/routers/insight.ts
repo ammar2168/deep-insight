@@ -1,6 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
+import { decryptForUser } from "@/server/crypto/envelope";
 import { entries, insights } from "@/server/db/schema";
 import { rankInsights } from "@/server/insights/priority";
 
@@ -17,8 +18,14 @@ export const insightRouter = createTRPCRouter({
 		const rows = await ctx.db.query.insights.findMany({
 			where: eq(insights.entryId, latestEntry.id),
 		});
+		const decrypted = await Promise.all(
+			rows.map(async (row) => ({
+				...row,
+				value: await decryptForUser(ctx.session.user.id, row.value),
+			})),
+		);
 
 		// Category priority decides the "lead" insight now, not extraction order.
-		return rankInsights(rows);
+		return rankInsights(decrypted);
 	}),
 });

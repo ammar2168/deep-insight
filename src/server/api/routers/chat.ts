@@ -4,6 +4,7 @@ import { z } from "zod";
 import { answerQuestion } from "@/server/ai/insights";
 import { checkForCrisisSignal } from "@/server/ai/safety";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
+import { decryptForUser } from "@/server/crypto/envelope";
 import { insights } from "@/server/db/schema";
 
 const CONTEXT_INSIGHT_LIMIT = 50;
@@ -33,10 +34,16 @@ export const chatRouter = createTRPCRouter({
 				orderBy: desc(insights.createdAt),
 				limit: CONTEXT_INSIGHT_LIMIT,
 			});
+			const decryptedInsights = await Promise.all(
+				recentInsights.map(async (insight) => ({
+					...insight,
+					value: await decryptForUser(ctx.session.user.id, insight.value),
+				})),
+			);
 
 			const answer = await answerQuestion(
 				input.question,
-				recentInsights,
+				decryptedInsights,
 				input.history,
 			);
 

@@ -9,6 +9,7 @@ import {
 } from "@/server/ai/insights";
 import { checkForCrisisSignal } from "@/server/ai/safety";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
+import { decryptForUser, encryptForUser } from "@/server/crypto/envelope";
 import { entries, INSIGHT_CATEGORIES, insights } from "@/server/db/schema";
 
 const photoInput = z.object({
@@ -51,10 +52,16 @@ function normalizeAndHashText(text: string): string {
 
 export const entryRouter = createTRPCRouter({
 	list: protectedProcedure.query(async ({ ctx }) => {
-		return ctx.db.query.entries.findMany({
+		const rows = await ctx.db.query.entries.findMany({
 			where: eq(entries.userId, ctx.session.user.id),
 			orderBy: desc(entries.createdAt),
 		});
+		return Promise.all(
+			rows.map(async (row) => ({
+				...row,
+				text: await decryptForUser(ctx.session.user.id, row.text),
+			})),
+		);
 	}),
 
 	/**
@@ -122,12 +129,22 @@ export const entryRouter = createTRPCRouter({
 			// saves regardless of encryption, which is why it's a separate column rather
 			// than something derived from the encrypted text later.
 			const textHash = normalizeAndHashText(input.text);
+			const encryptedText = await encryptForUser(
+				ctx.session.user.id,
+				input.text,
+			);
+			const encryptedInsights = await Promise.all(
+				input.insights.map(async (insight) => ({
+					...insight,
+					value: await encryptForUser(ctx.session.user.id, insight.value),
+				})),
+			);
 
 			return ctx.db.transaction(async (tx) => {
 				const [entry] = await tx
 					.insert(entries)
 					.values({
-						text: input.text,
+						text: encryptedText,
 						textHash,
 						entryDate: input.entryDate,
 						userId: ctx.session.user.id,
@@ -141,9 +158,9 @@ export const entryRouter = createTRPCRouter({
 					});
 				}
 
-				if (input.insights.length > 0) {
+				if (encryptedInsights.length > 0) {
 					await tx.insert(insights).values(
-						input.insights.map((insight) => ({
+						encryptedInsights.map((insight) => ({
 							entryId: entry.id,
 							userId: ctx.session.user.id,
 							category: insight.category,
@@ -153,7 +170,7 @@ export const entryRouter = createTRPCRouter({
 					);
 				}
 
-				return { entryId: entry.id, insightCount: input.insights.length };
+				return { entryId: entry.id, insightCount: encryptedInsights.length };
 			});
 		}),
 
