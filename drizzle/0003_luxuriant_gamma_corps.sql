@@ -1,0 +1,1 @@
+ALTER TABLE "entry" ALTER COLUMN "textHash" SET NOT NULL;

@@ -15,6 +15,20 @@
       "when": 1787931721414,
       "tag": "0001_fair_domino",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787933094929,
+      "tag": "0002_oval_romulus",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787933315356,
+      "tag": "0003_luxuriant_gamma_corps",
+      "breakpoints": true
     }
   ]
 }

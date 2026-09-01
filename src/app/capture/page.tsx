@@ -24,6 +24,10 @@ type Photo = { id: string; name: string; url: string; file: File };
 type ExtractedInsight =
 	RouterOutputs["entry"]["extractInsights"]["insights"][number];
 
+type PossibleDuplicate = NonNullable<
+	RouterOutputs["entry"]["findPossibleDuplicate"]
+>;
+
 type Category = ExtractedInsight["category"];
 
 type Insight = {
@@ -63,6 +67,15 @@ function getLocalDateString(date: Date = new Date()): string {
 	const month = String(date.getMonth() + 1).padStart(2, "0");
 	const day = String(date.getDate()).padStart(2, "0");
 	return `${year}-${month}-${day}`;
+}
+
+/** For display only. Appending a bare time (no "Z"/offset) forces local-midnight
+ * parsing instead of UTC-midnight, so the shown day never shifts by one. */
+function formatEntryDate(dateStr: string): string {
+	return new Date(`${dateStr}T00:00:00`).toLocaleDateString(undefined, {
+		month: "long",
+		day: "numeric",
+	});
 }
 
 function FoldIcon({ state }: { state: "pending" | "active" | "locked" }) {
@@ -247,6 +260,9 @@ export default function CapturePage() {
 	>(null);
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [crisisCheckIn, setCrisisCheckIn] = useState(false);
+	const [possibleDuplicate, setPossibleDuplicate] =
+		useState<PossibleDuplicate | null>(null);
+	const [checkingDuplicate, setCheckingDuplicate] = useState(false);
 	const [addingInsight, setAddingInsight] = useState(false);
 	const [editingInsightId, setEditingInsightId] = useState<string | null>(null);
 	const [newCategory, setNewCategory] = useState<Category>("mood");
@@ -330,7 +346,7 @@ export default function CapturePage() {
 		}
 	}
 
-	async function handleContinueToInsights() {
+	async function runExtractInsights() {
 		setExtractInsightsError(null);
 		try {
 			const result = await extractInsightsMutation.mutateAsync({
@@ -350,6 +366,32 @@ export default function CapturePage() {
 				errorMessage(err, "Couldn't pull insights from that text. Try again?"),
 			);
 		}
+	}
+
+	async function handleContinueToInsights() {
+		setExtractInsightsError(null);
+		setCheckingDuplicate(true);
+		try {
+			const duplicate = await utils.entry.findPossibleDuplicate.fetch({
+				text: entryText,
+			});
+			setCheckingDuplicate(false);
+			if (duplicate) {
+				setPossibleDuplicate(duplicate);
+				return;
+			}
+			await runExtractInsights();
+		} catch (err) {
+			setCheckingDuplicate(false);
+			setExtractInsightsError(
+				errorMessage(err, "Couldn't check for duplicates. Try again?"),
+			);
+		}
+	}
+
+	function handleContinueAnyway() {
+		setPossibleDuplicate(null);
+		void runExtractInsights();
 	}
 
 	function handleCrisisContinue() {
@@ -641,7 +683,10 @@ export default function CapturePage() {
 								<textarea
 									aria-label="Entry text"
 									className="min-h-40 resize-y rounded-sm border border-indigo-500/20 bg-paper-200 p-4 text-[15px] text-ink-900 leading-relaxed transition-colors focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
-									onChange={(e) => setEntryText(e.target.value)}
+									onChange={(e) => {
+										setEntryText(e.target.value);
+										setPossibleDuplicate(null);
+									}}
 									placeholder="Type what you wrote today…"
 									value={entryText}
 								/>
@@ -657,6 +702,34 @@ export default function CapturePage() {
 									</p>
 								)}
 
+								{possibleDuplicate && (
+									<div className="flex flex-col gap-3 rounded-sm border border-indigo-500/40 bg-paper-200 p-4">
+										<p className="text-ink-900 text-sm">
+											This looks similar to your entry from{" "}
+											<span className="font-medium">
+												{formatEntryDate(possibleDuplicate.entryDate)}
+											</span>
+											. Already logged that one?
+										</p>
+										<div className="flex justify-end gap-2">
+											<button
+												className="rounded-full px-3 py-1.5 font-medium text-ink-600 text-xs transition-colors hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
+												onClick={() => setPossibleDuplicate(null)}
+												type="button"
+											>
+												Go back and edit
+											</button>
+											<button
+												className="rounded-full bg-indigo-600 px-3 py-1.5 font-medium text-paper-100 text-xs transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
+												onClick={handleContinueAnyway}
+												type="button"
+											>
+												Continue anyway
+											</button>
+										</div>
+									</div>
+								)}
+
 								<div className="flex items-center justify-between">
 									<button
 										className="text-ink-600 text-sm underline decoration-indigo-500/40 underline-offset-4 hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
@@ -670,15 +743,20 @@ export default function CapturePage() {
 										disabled={
 											entryText.trim().length === 0 ||
 											entryDate.length === 0 ||
-											extractInsightsMutation.isPending
+											checkingDuplicate ||
+											extractInsightsMutation.isPending ||
+											possibleDuplicate !== null
 										}
 										onClick={handleContinueToInsights}
 										type="button"
 									>
-										{extractInsightsMutation.isPending && <SpinnerIcon />}
-										{extractInsightsMutation.isPending
-											? "Reading for signal…"
-											: "Continue to insights"}
+										{(checkingDuplicate ||
+											extractInsightsMutation.isPending) && <SpinnerIcon />}
+										{checkingDuplicate
+											? "Checking…"
+											: extractInsightsMutation.isPending
+												? "Reading for signal…"
+												: "Continue to insights"}
 									</button>
 								</div>
 							</section>
