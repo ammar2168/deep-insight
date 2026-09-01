@@ -3,7 +3,9 @@ import "server-only";
 import { TRPCError } from "@trpc/server";
 
 import { INSIGHT_CATEGORIES } from "@/server/db/schema/insight";
+import { analyzeTrend } from "@/server/insights/trend-analysis";
 import { getClient, MODEL } from "./client";
+import { runToolLoop, type ToolDefinition } from "./tool-loop";
 
 export type Photo = { base64: string; mediaType: string };
 
@@ -181,13 +183,56 @@ ${text}
 	return input.insights ?? [];
 }
 
+const ANALYZE_TREND_TOOL_DESCRIPTION =
+	"Investigate a pattern, change, or possible correlation in the user's journal history over a date range — not for simple lookups, only for questions about how something has changed or what might explain a shift over a meaningful span of time (weeks or months). Looks across ALL categories, not just the one the question names, and returns a hedged, evidence-grounded answer — never a certain one.";
+
+function buildAnalyzeTrendTool(userId: string): ToolDefinition {
+	return {
+		name: "analyze_trend",
+		description: ANALYZE_TREND_TOOL_DESCRIPTION,
+		input_schema: {
+			type: "object",
+			properties: {
+				question: {
+					type: "string",
+					description: "The specific trend or pattern question to investigate.",
+				},
+				start_date: { type: "string", description: "YYYY-MM-DD, inclusive." },
+				end_date: { type: "string", description: "YYYY-MM-DD, inclusive." },
+			},
+			required: ["question", "start_date", "end_date"],
+		},
+		handler: async (input: {
+			question: string;
+			start_date: string;
+			end_date: string;
+		}) => {
+			try {
+				return await analyzeTrend(userId, input.question, {
+					start: input.start_date,
+					end: input.end_date,
+				});
+			} catch (err) {
+				// A failure here (a transient API error, a DB hiccup mid-pipeline) shouldn't
+				// take down the whole chat response — the outer loop is still running and
+				// can fall back to the flat recent-insight context already in its system
+				// prompt. Never log the question/journal content itself, only metadata.
+				console.error(
+					`[analyze_trend] failed for range ${input.start_date} to ${input.end_date}:`,
+					err instanceof Error ? err.message : err,
+				);
+				return "A deeper look at this wasn't available right now (a technical issue came up partway through) — answer using only the recent insights already listed, and let the user know a full trend analysis wasn't possible this time so they can try again.";
+			}
+		},
+	};
+}
+
 export async function answerQuestion(
+	userId: string,
 	question: string,
 	insights: { label: string; value: string; createdAt: Date }[],
 	history: { question: string; answer: string }[],
 ): Promise<string> {
-	const client = getClient();
-
 	const insightContext =
 		insights.length === 0
 			? "(No insights recorded yet.)"
@@ -206,10 +251,16 @@ export async function answerQuestion(
 			] as const,
 	);
 
-	const response = await client.messages.create({
-		model: MODEL,
-		max_tokens: 1024,
-		system: `You are a reflective journalling assistant inside a personal journal app. Answer the user's question using ONLY the insights listed below, which were extracted from their own journal entries. Be warm, concise, and specific — reference their own insights directly rather than speaking in generalities. If the insights don't contain enough to answer well, say so honestly instead of guessing or inventing detail.
+	const today = new Date().toISOString().slice(0, 10);
+
+	return runToolLoop({
+		system: `You are a reflective journalling assistant inside a personal journal app. Today's date is ${today}.
+
+Answer the user's question using the insights listed below, which were extracted from their own journal entries — this list only covers their most recent insights across all categories, not their full history. If the question is a simple lookup ("what's my latest X", "what did I say about Y recently"), answer directly from this list. If the question asks about a pattern, trend, or change over a meaningful span of time — "how has my sleep been the last few months", "has my mood improved since I started X" — the list below almost certainly isn't enough; use the analyze_trend tool instead of guessing from a handful of recent items.
+
+For open-ended check-in questions with no specific timeframe or focus ("how am I doing", "am I okay", "what's going on with me") — answer from the list above and invite them to name a timeframe or focus if they want a deeper look, rather than reaching for the tool on a genuinely vague question. Reserve the tool for when the question itself signals interest in something over time ("lately", "the last few months", "since I started X") — and even then, if they haven't given an exact range, a moderate default (a few months back) is more proportionate than scanning their entire history for a question that never asked for that.
+
+Be warm, concise, and specific — reference their own insights directly rather than speaking in generalities. If you don't have enough to answer well even after using a tool if needed, say so honestly instead of guessing or inventing detail.
 
 Format for readability, using markdown:
 - Open with one short sentence, not a summary paragraph.
@@ -221,14 +272,7 @@ Format for readability, using markdown:
 Insights on record:
 ${insightContext}`,
 		messages: [...historyMessages, { role: "user", content: question }],
+		tools: [buildAnalyzeTrendTool(userId)],
+		maxTokens: 1024,
 	});
-
-	const textBlock = response.content.find((block) => block.type === "text");
-	if (textBlock?.type !== "text") {
-		throw new TRPCError({
-			code: "INTERNAL_SERVER_ERROR",
-			message: "Couldn't read a response from the model",
-		});
-	}
-	return textBlock.text.trim();
 }

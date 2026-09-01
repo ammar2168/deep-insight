@@ -45,6 +45,7 @@ export const chatRouter = createTRPCRouter({
 			}));
 
 			const answer = await answerQuestion(
+				ctx.session.user.id,
 				input.question,
 				decryptedInsights,
 				input.history,
