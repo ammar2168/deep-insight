@@ -6,6 +6,12 @@ export const entries = pgTable(
 	(d) => ({
 		id: d.integer().primaryKey().generatedByDefaultAsIdentity(),
 		text: d.text().notNull(),
+		/**
+		 * The calendar day this entry is about — distinct from createdAt (when the row
+		 * was saved). Always supplied explicitly by the client's local date, never
+		 * server-defaulted, so a late upload never silently mis-dates the entry.
+		 */
+		entryDate: d.date({ mode: "string" }).notNull(),
 		userId: d
 			.text()
 			.notNull()

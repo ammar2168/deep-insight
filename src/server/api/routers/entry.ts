@@ -21,6 +21,24 @@ const insightInput = z.object({
 	value: z.string().min(1),
 });
 
+/**
+ * Generous upper bound (server time + 1 day) rather than a strict "today" check —
+ * this only needs to catch obviously-wrong input, not precisely enforce "not in the
+ * future," which isn't knowable server-side across client timezones anyway.
+ */
+function maxAllowedEntryDate(): string {
+	const d = new Date();
+	d.setUTCDate(d.getUTCDate() + 1);
+	return d.toISOString().slice(0, 10);
+}
+
+const entryDateInput = z
+	.string()
+	.date()
+	.refine((value) => value <= maxAllowedEntryDate(), {
+		message: "Entry date can't be in the future.",
+	});
+
 export const entryRouter = createTRPCRouter({
 	list: protectedProcedure.query(async ({ ctx }) => {
 		return ctx.db.query.entries.findMany({
@@ -60,6 +78,7 @@ export const entryRouter = createTRPCRouter({
 		.input(
 			z.object({
 				text: z.string().min(1),
+				entryDate: entryDateInput,
 				insights: z.array(insightInput),
 			}),
 		)
@@ -69,6 +88,7 @@ export const entryRouter = createTRPCRouter({
 					.insert(entries)
 					.values({
 						text: input.text,
+						entryDate: input.entryDate,
 						userId: ctx.session.user.id,
 					})
 					.returning();

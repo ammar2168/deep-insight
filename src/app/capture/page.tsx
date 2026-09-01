@@ -57,6 +57,14 @@ function errorMessage(err: unknown, fallback: string) {
 	return err instanceof Error && err.message ? err.message : fallback;
 }
 
+/** Local calendar date as YYYY-MM-DD — never toISOString(), which converts to UTC first. */
+function getLocalDateString(date: Date = new Date()): string {
+	const year = date.getFullYear();
+	const month = String(date.getMonth() + 1).padStart(2, "0");
+	const day = String(date.getDate()).padStart(2, "0");
+	return `${year}-${month}-${day}`;
+}
+
 function FoldIcon({ state }: { state: "pending" | "active" | "locked" }) {
 	if (state === "locked") {
 		return (
@@ -226,6 +234,7 @@ export default function CapturePage() {
 	const [transitioning, setTransitioning] = useState(false);
 	const [photos, setPhotos] = useState<Photo[]>([]);
 	const [entryText, setEntryText] = useState("");
+	const [entryDate, setEntryDate] = useState(() => getLocalDateString());
 	const [insights, setInsights] = useState<Insight[]>([]);
 	const [confirmingDiscardId, setConfirmingDiscardId] = useState<string | null>(
 		null,
@@ -244,6 +253,7 @@ export default function CapturePage() {
 	const [newLabel, setNewLabel] = useState("");
 	const [newValue, setNewValue] = useState("");
 	const uploadInputId = useId();
+	const entryDateId = useId();
 	const newCategoryId = useId();
 	const newLabelId = useId();
 	const newValueId = useId();
@@ -411,6 +421,7 @@ export default function CapturePage() {
 		try {
 			const result = await saveMutation.mutateAsync({
 				text: entryText,
+				entryDate,
 				insights: insights.map(({ category, label, value }) => ({
 					category,
 					label,
@@ -606,6 +617,27 @@ export default function CapturePage() {
 									</p>
 								)}
 
+								<div className="flex flex-col gap-1">
+									<label
+										className="font-mono text-[11px] text-ink-600 uppercase tracking-wide"
+										htmlFor={entryDateId}
+									>
+										Date
+									</label>
+									<input
+										className="w-fit rounded-sm border border-indigo-500/20 bg-paper-200 px-3 py-2 text-[15px] text-ink-900 transition-colors focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+										id={entryDateId}
+										max={getLocalDateString()}
+										onChange={(e) => setEntryDate(e.target.value)}
+										type="date"
+										value={entryDate}
+									/>
+									<p className="text-ink-600 text-xs">
+										Defaults to today — change it if you&rsquo;re catching up on
+										an older page.
+									</p>
+								</div>
+
 								<textarea
 									aria-label="Entry text"
 									className="min-h-40 resize-y rounded-sm border border-indigo-500/20 bg-paper-200 p-4 text-[15px] text-ink-900 leading-relaxed transition-colors focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
@@ -637,6 +669,7 @@ export default function CapturePage() {
 										className="inline-flex items-center gap-2 rounded-sm bg-indigo-600 px-5 py-2.5 font-medium text-paper-100 text-sm transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
 										disabled={
 											entryText.trim().length === 0 ||
+											entryDate.length === 0 ||
 											extractInsightsMutation.isPending
 										}
 										onClick={handleContinueToInsights}
