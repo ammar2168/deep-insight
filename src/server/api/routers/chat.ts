@@ -4,7 +4,7 @@ import { z } from "zod";
 import { answerQuestion } from "@/server/ai/insights";
 import { checkForCrisisSignal } from "@/server/ai/safety";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
-import { decryptForUser } from "@/server/crypto/envelope";
+import { decryptManyForUser } from "@/server/crypto/envelope";
 import { insights } from "@/server/db/schema";
 
 const CONTEXT_INSIGHT_LIMIT = 50;
@@ -34,12 +34,15 @@ export const chatRouter = createTRPCRouter({
 				orderBy: desc(insights.createdAt),
 				limit: CONTEXT_INSIGHT_LIMIT,
 			});
-			const decryptedInsights = await Promise.all(
-				recentInsights.map(async (insight) => ({
-					...insight,
-					value: await decryptForUser(ctx.session.user.id, insight.value),
-				})),
+			const decryptedValues = await decryptManyForUser(
+				ctx.session.user.id,
+				recentInsights.map((insight) => insight.value),
 			);
+			const decryptedInsights = recentInsights.map((insight, i) => ({
+				...insight,
+				// biome-ignore lint/style/noNonNullAssertion: decryptedValues has exactly one entry per insight, same order
+				value: decryptedValues[i]!,
+			}));
 
 			const answer = await answerQuestion(
 				input.question,

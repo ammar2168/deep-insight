@@ -1,10 +1,6 @@
 import "server-only";
 
-import {
-	createCipheriv,
-	createDecipheriv,
-	randomBytes,
-} from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 
@@ -78,13 +74,19 @@ async function getOrCreateUserDek(userId: string): Promise<Buffer> {
 		where: eq(userEncryptionKeys.userId, userId),
 	});
 	if (existing) {
-		return Buffer.from(decryptWithKey(masterKey, existing.wrappedDek), "base64");
+		return Buffer.from(
+			decryptWithKey(masterKey, existing.wrappedDek),
+			"base64",
+		);
 	}
 
 	const dek = randomBytes(KEY_LENGTH);
 	await db
 		.insert(userEncryptionKeys)
-		.values({ userId, wrappedDek: encryptWithKey(masterKey, dek.toString("base64")) })
+		.values({
+			userId,
+			wrappedDek: encryptWithKey(masterKey, dek.toString("base64")),
+		})
 		.onConflictDoNothing();
 
 	const row = await db.query.userEncryptionKeys.findFirst({
@@ -119,4 +121,18 @@ export async function decryptForUser(
 ): Promise<string> {
 	const dek = await getOrCreateUserDek(userId);
 	return decryptWithKey(dek, ciphertext);
+}
+
+/**
+ * Same as decryptForUser, but for many ciphertexts from the same user at once — the
+ * DEK is fetched and unwrapped exactly once regardless of array length, instead of once
+ * per item. Worth using anywhere decrypting more than a couple of values in a loop.
+ */
+export async function decryptManyForUser(
+	userId: string,
+	ciphertexts: string[],
+): Promise<string[]> {
+	if (ciphertexts.length === 0) return [];
+	const dek = await getOrCreateUserDek(userId);
+	return ciphertexts.map((ciphertext) => decryptWithKey(dek, ciphertext));
 }

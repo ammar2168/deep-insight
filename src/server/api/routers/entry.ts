@@ -9,7 +9,7 @@ import {
 } from "@/server/ai/insights";
 import { checkForCrisisSignal } from "@/server/ai/safety";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
-import { decryptForUser, encryptForUser } from "@/server/crypto/envelope";
+import { decryptManyForUser, encryptForUser } from "@/server/crypto/envelope";
 import { entries, INSIGHT_CATEGORIES, insights } from "@/server/db/schema";
 
 const photoInput = z.object({
@@ -56,12 +56,15 @@ export const entryRouter = createTRPCRouter({
 			where: eq(entries.userId, ctx.session.user.id),
 			orderBy: desc(entries.createdAt),
 		});
-		return Promise.all(
-			rows.map(async (row) => ({
-				...row,
-				text: await decryptForUser(ctx.session.user.id, row.text),
-			})),
+		const decryptedTexts = await decryptManyForUser(
+			ctx.session.user.id,
+			rows.map((row) => row.text),
 		);
+		return rows.map((row, i) => ({
+			...row,
+			// biome-ignore lint/style/noNonNullAssertion: decryptedTexts has exactly one entry per row, same order
+			text: decryptedTexts[i]!,
+		}));
 	}),
 
 	/**
