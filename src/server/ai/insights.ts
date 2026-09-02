@@ -137,12 +137,33 @@ export async function extractTextFromPhotos(photos: Photo[]): Promise<{
 	// read must actually be findable in the transcription it just produced, or
 	// it's dropped — same anti-fabrication rule as everywhere else this touches
 	// AI output that goes on to make a decision (here, what to default entryDate to).
+	// resolved_date is also checked against the exact YYYY-MM-DD shape the client
+	// feeds straight into a controlled <input type="date">: a browser silently
+	// blanks that input for any other shape while React's own state keeps holding
+	// the original string, so a malformed value here would sail through the UI
+	// looking like nothing's wrong and only fail once save's own zod check hits it.
+	const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+	/** Right shape isn't enough — "2026-13-45" matches ISO_DATE too. Round-tripping
+	 * through Date confirms it's a real calendar day, not just digits in the right places. */
+	function isRealCalendarDate(value: string): boolean {
+		const [year, month, day] = value.split("-").map(Number);
+		const d = new Date(Date.UTC(year ?? 0, (month ?? 0) - 1, day ?? 0));
+		return (
+			d.getUTCFullYear() === year &&
+			d.getUTCMonth() === (month ?? 0) - 1 &&
+			d.getUTCDate() === day
+		);
+	}
 	const mentionedDates = (input.mentioned_dates ?? [])
 		.filter(
 			(d): d is { raw_text: string; resolved_date: string } =>
 				typeof d.raw_text === "string" && typeof d.resolved_date === "string",
 		)
 		.filter((d) => text.toLowerCase().includes(d.raw_text.toLowerCase()))
+		.filter(
+			(d) =>
+				ISO_DATE.test(d.resolved_date) && isRealCalendarDate(d.resolved_date),
+		)
 		.map((d) => ({ rawText: d.raw_text, resolvedDate: d.resolved_date }));
 
 	return { text, mentionedDates };
