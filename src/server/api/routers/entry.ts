@@ -76,14 +76,16 @@ export const entryRouter = createTRPCRouter({
 	extractText: protectedProcedure
 		.input(z.object({ photos: z.array(photoInput).min(1).max(10) }))
 		.mutation(async ({ ctx, input }) => {
-			const text = await extractTextFromPhotos(input.photos);
+			const { text, mentionedDates } = await extractTextFromPhotos(
+				input.photos,
+			);
 			const crisis = await checkForCrisisSignal(text);
 			if (crisis) {
 				console.warn(
 					`[safety] crisis signal flagged in entry.extractText for user ${ctx.session.user.id}`,
 				);
 			}
-			return { text, crisis };
+			return { text, crisis, mentionedDates };
 		}),
 
 	/** Stage 2 -> 3: extract discrete insights from the (possibly hand-edited) entry text. */

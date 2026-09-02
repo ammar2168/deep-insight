@@ -47,17 +47,42 @@ const RECORD_TRANSCRIPTION_TOOL = {
 				description:
 					"The transcribed handwriting, exactly as written, nothing else. No commentary, caveats, safety notes, or reactions of any kind, even if the content is emotionally difficult, distressing, or concerning — this field holds only what the writer wrote, verbatim.",
 			},
+			mentioned_dates: {
+				type: "array" as const,
+				items: {
+					type: "object" as const,
+					properties: {
+						raw_text: {
+							type: "string" as const,
+							description:
+								"The exact words from the page stating the date, copied verbatim (e.g. 'August 26th', 'Sept 3').",
+						},
+						resolved_date: {
+							type: "string" as const,
+							description:
+								"That date resolved to YYYY-MM-DD. Use today's date only to fill in a missing year or resolve a relative reference — never change what the page actually says.",
+						},
+					},
+					required: ["raw_text", "resolved_date"],
+				},
+				description:
+					"Every date the writer uses to mark WHEN this entry (or a distinct section of it) was written — typically a header at the top of a page or paragraph, like a diary dateline. Do NOT include a date mentioned only in passing (an appointment, someone's birthday, a plan for next week) — only dates that mark the entry itself. If the page has no such dateline at all, return an empty array rather than guessing.",
+			},
 		},
-		required: ["transcription"],
+		required: ["transcription", "mentioned_dates"],
 	},
 };
 
-export async function extractTextFromPhotos(photos: Photo[]): Promise<string> {
+export async function extractTextFromPhotos(photos: Photo[]): Promise<{
+	text: string;
+	mentionedDates: { rawText: string; resolvedDate: string }[];
+}> {
 	if (photos.length === 0) {
 		throw new TRPCError({ code: "BAD_REQUEST", message: "No photos provided" });
 	}
 
 	const client = getClient();
+	const today = new Date().toISOString().slice(0, 10);
 
 	const response = await client.messages.create({
 		model: MODEL,
@@ -81,12 +106,13 @@ export async function extractTextFromPhotos(photos: Photo[]): Promise<string> {
 					),
 					{
 						type: "text",
-						text: `These are photo(s) of one handwritten journal page, or several pages from the same journalling session. Transcribe the handwritten text as accurately as you can into clean, continuous prose.
+						text: `These are photo(s) of one handwritten journal page, or several pages from the same journalling session. Transcribe the handwritten text as accurately as you can into clean, continuous prose. Today's date is ${today}.
 
 - Preserve paragraph breaks the writer used.
 - If a word is illegible, use your best guess rather than skipping it.
 - If multiple photos are provided, transcribe them in order as one continuous entry.
-- The transcription field holds ONLY what's written on the page — never add your own commentary, headers, dates, safety notes, or reactions, no matter what the content is. A separate part of this system, not you, handles anything that needs a caring response.`,
+- The transcription field holds ONLY what's written on the page — never add your own commentary, headers, dates, safety notes, or reactions, no matter what the content is. A separate part of this system, not you, handles anything that needs a caring response.
+- Separately, record any dateline the writer used to mark when an entry was written (see the mentioned_dates field) — this is metadata for the app, not part of the transcription itself.`,
 					},
 				],
 			},
@@ -101,8 +127,25 @@ export async function extractTextFromPhotos(photos: Photo[]): Promise<string> {
 		});
 	}
 
-	const input = toolUse.input as { transcription?: string };
-	return (input.transcription ?? "").trim();
+	const input = toolUse.input as {
+		transcription?: string;
+		mentioned_dates?: { raw_text?: string; resolved_date?: string }[];
+	};
+	const text = (input.transcription ?? "").trim();
+
+	// Mechanically verified rather than trusted: a date the model claims to have
+	// read must actually be findable in the transcription it just produced, or
+	// it's dropped — same anti-fabrication rule as everywhere else this touches
+	// AI output that goes on to make a decision (here, what to default entryDate to).
+	const mentionedDates = (input.mentioned_dates ?? [])
+		.filter(
+			(d): d is { raw_text: string; resolved_date: string } =>
+				typeof d.raw_text === "string" && typeof d.resolved_date === "string",
+		)
+		.filter((d) => text.toLowerCase().includes(d.raw_text.toLowerCase()))
+		.map((d) => ({ rawText: d.raw_text, resolvedDate: d.resolved_date }));
+
+	return { text, mentionedDates };
 }
 
 export type ExtractedInsight = {

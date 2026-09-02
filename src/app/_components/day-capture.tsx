@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useId, useState } from "react";
 import { CrisisCheckInModal } from "@/app/_components/crisis-check-in-modal";
 import type { RouterOutputs } from "@/trpc/react";
@@ -331,6 +332,8 @@ export function DayCapture({
 	const [photos, setPhotos] = useState<Photo[]>(initialPhotos);
 	const [entryText, setEntryText] = useState("");
 	const [entryDate, setEntryDate] = useState(initialDate);
+	const [detectedDate, setDetectedDate] = useState<string | null>(null);
+	const [multiDayDates, setMultiDayDates] = useState<string[] | null>(null);
 	const [insights, setInsights] = useState<Insight[]>([]);
 	const [confirmingDiscardId, setConfirmingDiscardId] = useState<string | null>(
 		null,
@@ -391,6 +394,8 @@ export function DayCapture({
 
 	async function handleExtractText() {
 		setExtractTextError(null);
+		setDetectedDate(null);
+		setMultiDayDates(null);
 		try {
 			const photoInputs = await Promise.all(
 				photos.map(async (p) => ({
@@ -402,6 +407,24 @@ export function DayCapture({
 				photos: photoInputs,
 			});
 			setEntryText(result.text);
+
+			// Distinct calendar dates the page itself is dated with — one match means
+			// we can default entryDate to what's actually written instead of leaving
+			// it at whatever it started as; two or more means these photos likely
+			// aren't one day's entry at all, which the crease stage warns about
+			// instead of silently merging them under a single date.
+			const distinctDates = [
+				...new Set(result.mentionedDates.map((d) => d.resolvedDate)),
+			];
+			if (distinctDates.length === 1) {
+				// biome-ignore lint/style/noNonNullAssertion: length check above guarantees exactly one element
+				const only = distinctDates[0]!;
+				setEntryDate(only);
+				setDetectedDate(only);
+			} else if (distinctDates.length > 1) {
+				setMultiDayDates(distinctDates);
+			}
+
 			if (result.crisis) {
 				// Pause here instead of dropping the user straight into an editable box
 				// holding their own words back at them; they advance once they continue.
@@ -684,15 +707,37 @@ export function DayCapture({
 									className="w-fit rounded-sm border border-indigo-500/20 bg-paper-200 px-3 py-2 text-[15px] text-ink-900 transition-colors focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
 									id={entryDateId}
 									max={getLocalDateString()}
-									onChange={(e) => setEntryDate(e.target.value)}
+									onChange={(e) => {
+										setEntryDate(e.target.value);
+										setDetectedDate(null);
+									}}
 									type="date"
 									value={entryDate}
 								/>
 								<p className="text-ink-600 text-xs">
-									Defaults to today — change it if you&rsquo;re catching up on
-									an older page.
+									{detectedDate
+										? `We noticed you wrote ${formatEntryDate(detectedDate)} on the page — change it if that’s not right.`
+										: "Defaults to today — change it if you’re catching up on an older page."}
 								</p>
 							</div>
+
+							{multiDayDates && (
+								<div className="flex flex-col gap-3 rounded-sm border border-indigo-500/40 bg-paper-200 p-4">
+									<p className="text-ink-900 text-sm">
+										This looks like it covers more than one day —{" "}
+										{multiDayDates.map((d) => formatEntryDate(d)).join(" and ")}
+										. If these are separate days, you&rsquo;ll get better
+										results using{" "}
+										<Link
+											className="underline decoration-indigo-500/40 underline-offset-4 hover:text-ink-900"
+											href="/capture/batch"
+										>
+											Add several days at once
+										</Link>{" "}
+										instead of saving them together.
+									</p>
+								</div>
+							)}
 
 							<textarea
 								aria-label="Entry text"
