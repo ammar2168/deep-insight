@@ -146,21 +146,29 @@ export default async function Home() {
 										: "Hi there"}
 								</h1>
 							</div>
-							<form className="shrink-0">
-								<button
+							<div className="flex shrink-0 items-center gap-4">
+								<Link
 									className="whitespace-nowrap text-indigo-400 text-sm underline decoration-indigo-500/40 underline-offset-4 hover:text-paper-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
-									formAction={async () => {
-										"use server";
-										await auth.api.signOut({
-											headers: await headers(),
-										});
-										redirect("/");
-									}}
-									type="submit"
+									href="/settings"
 								>
-									Sign out
-								</button>
-							</form>
+									Settings
+								</Link>
+								<form>
+									<button
+										className="whitespace-nowrap text-indigo-400 text-sm underline decoration-indigo-500/40 underline-offset-4 hover:text-paper-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
+										formAction={async () => {
+											"use server";
+											await auth.api.signOut({
+												headers: await headers(),
+											});
+											redirect("/");
+										}}
+										type="submit"
+									>
+										Sign out
+									</button>
+								</form>
+							</div>
 						</header>
 
 						<Link
