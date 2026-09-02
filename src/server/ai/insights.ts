@@ -119,6 +119,15 @@ export async function extractTextFromPhotos(photos: Photo[]): Promise<{
 		],
 	});
 
+	console.log(
+		`[extractText] stop_reason=${response.stop_reason} output_tokens=${response.usage.output_tokens}`,
+	);
+	if (response.stop_reason === "max_tokens") {
+		console.warn(
+			"[extractText] response hit max_tokens — output was likely truncated",
+		);
+	}
+
 	const toolUse = response.content.find((block) => block.type === "tool_use");
 	if (toolUse?.type !== "tool_use") {
 		throw new TRPCError({
@@ -129,9 +138,12 @@ export async function extractTextFromPhotos(photos: Photo[]): Promise<{
 
 	const input = toolUse.input as {
 		transcription?: string;
-		mentioned_dates?: { raw_text?: string; resolved_date?: string }[];
+		mentioned_dates?: unknown;
 	};
 	const text = (input.transcription ?? "").trim();
+	const rawMentionedDates = Array.isArray(input.mentioned_dates)
+		? (input.mentioned_dates as { raw_text?: string; resolved_date?: string }[])
+		: [];
 
 	// Mechanically verified rather than trusted: a date the model claims to have
 	// read must actually be findable in the transcription it just produced, or
@@ -154,7 +166,7 @@ export async function extractTextFromPhotos(photos: Photo[]): Promise<{
 			d.getUTCDate() === day
 		);
 	}
-	const mentionedDates = (input.mentioned_dates ?? [])
+	const mentionedDates = rawMentionedDates
 		.filter(
 			(d): d is { raw_text: string; resolved_date: string } =>
 				typeof d.raw_text === "string" && typeof d.resolved_date === "string",
@@ -217,7 +229,7 @@ export async function extractInsightsFromText(
 
 	const response = await client.messages.create({
 		model: MODEL,
-		max_tokens: 1024,
+		max_tokens: 2048,
 		tools: [RECORD_INSIGHTS_TOOL],
 		tool_choice: { type: "tool", name: "record_insights" },
 		messages: [
@@ -235,6 +247,15 @@ ${text}
 		],
 	});
 
+	console.log(
+		`[extractInsights] stop_reason=${response.stop_reason} output_tokens=${response.usage.output_tokens}`,
+	);
+	if (response.stop_reason === "max_tokens") {
+		console.warn(
+			"[extractInsights] response hit max_tokens — output was likely truncated",
+		);
+	}
+
 	const toolUse = response.content.find((block) => block.type === "tool_use");
 	if (toolUse?.type !== "tool_use") {
 		throw new TRPCError({
@@ -243,8 +264,22 @@ ${text}
 		});
 	}
 
-	const input = toolUse.input as { insights?: ExtractedInsight[] };
-	return input.insights ?? [];
+	const input = toolUse.input as { insights?: unknown };
+	if (!Array.isArray(input.insights)) {
+		// Not a hypothetical: a long real entry can push a truncated tool call's
+		// JSON into a shape that isn't a clean array, and casting alone won't catch
+		// that at runtime — surface it plainly instead of crashing downstream with
+		// an opaque "X.map is not a function" wherever the caller expects a list.
+		console.error(
+			`[extractInsights] malformed tool response, stop_reason=${response.stop_reason}:`,
+			JSON.stringify(toolUse.input).slice(0, 500),
+		);
+		throw new TRPCError({
+			code: "INTERNAL_SERVER_ERROR",
+			message: "Couldn't read insights from the model's response",
+		});
+	}
+	return input.insights as ExtractedInsight[];
 }
 
 const ANALYZE_TREND_TOOL_DESCRIPTION =
