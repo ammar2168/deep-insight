@@ -145,10 +145,11 @@ Every `analyzeTrend` call gets a short random trace ID, and every log line at ev
 ## 9. Explicitly not built yet
 
 - **Scheduling/caching** — Tier 1/Tier 2 run fully on-demand, every time. A closed week is provably immutable (no edits after save), so precomputing and caching is safe whenever it's needed — just not built, since on-demand hasn't shown a latency/cost problem yet.
-- **Chat persistence** — conversations live only in browser state.
-- **Consent gate / data export & delete UI** — the technical foundation (cascade-delete on every table's `userId` FK) is already correct; the user-facing surface for it isn't built.
-- **Batch-backfill capture flow** — uploading many distinct past days in one sitting, each getting its own date. Today's capture flow treats a batch of photos as one session with one date.
+- **Chat persistence** — conversations live only in browser state. On hold by product decision, not scheduled.
+- **Data export** — `/settings` has a disabled placeholder button for it; the actual decrypt-and-download logic isn't built yet.
 - **Prod deployment of any of this** — dev and prod are intentionally out of sync; the plan is one batched migrate-and-deploy once this whole arc is done, not incremental prod pushes.
+
+Since built: account deletion with a user-facing danger-zone confirm at `/settings` (the cascade-delete foundation this section used to just call "already correct" is now actually exercised by it), and a batch-backfill capture flow at `/capture/batch` for catching up on several days in one sitting.
 
 ---
 
