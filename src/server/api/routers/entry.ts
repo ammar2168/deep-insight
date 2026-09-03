@@ -8,7 +8,7 @@ import {
 	extractTextFromPhotos,
 } from "@/server/ai/insights";
 import { checkForCrisisSignal } from "@/server/ai/safety";
-import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
+import { consentedProcedure, createTRPCRouter } from "@/server/api/trpc";
 import { decryptManyForUser, encryptForUser } from "@/server/crypto/envelope";
 import { entries, INSIGHT_CATEGORIES, insights } from "@/server/db/schema";
 
@@ -51,7 +51,7 @@ function normalizeAndHashText(text: string): string {
 }
 
 export const entryRouter = createTRPCRouter({
-	list: protectedProcedure.query(async ({ ctx }) => {
+	list: consentedProcedure.query(async ({ ctx }) => {
 		const rows = await ctx.db.query.entries.findMany({
 			where: eq(entries.userId, ctx.session.user.id),
 			orderBy: desc(entries.createdAt),
@@ -73,7 +73,7 @@ export const entryRouter = createTRPCRouter({
 	 * the client shows CrisisCheckInModal first when `crisis` is true, and only advances
 	 * to stage 2 once the user continues past it.
 	 */
-	extractText: protectedProcedure
+	extractText: consentedProcedure
 		.input(z.object({ photos: z.array(photoInput).min(1).max(10) }))
 		.mutation(async ({ ctx, input }) => {
 			const { text, mentionedDates } = await extractTextFromPhotos(
@@ -89,7 +89,7 @@ export const entryRouter = createTRPCRouter({
 		}),
 
 	/** Stage 2 -> 3: extract discrete insights from the (possibly hand-edited) entry text. */
-	extractInsights: protectedProcedure
+	extractInsights: consentedProcedure
 		.input(z.object({ text: z.string().min(1) }))
 		.mutation(async ({ input }) => {
 			return { insights: await extractInsightsFromText(input.text) };
@@ -101,7 +101,7 @@ export const entryRouter = createTRPCRouter({
 	 * scoped to the last DUPLICATE_CHECK_WINDOW_DAYS since a real accidental duplicate is
 	 * almost always close in time; an identical-but-unrelated entry months apart shouldn't nag.
 	 */
-	findPossibleDuplicate: protectedProcedure
+	findPossibleDuplicate: consentedProcedure
 		.input(z.object({ text: z.string().min(1) }))
 		.query(async ({ ctx, input }) => {
 			const textHash = normalizeAndHashText(input.text);
@@ -121,7 +121,7 @@ export const entryRouter = createTRPCRouter({
 		}),
 
 	/** Stage 3 save: persist the entry text and whichever insights the user kept. */
-	save: protectedProcedure
+	save: consentedProcedure
 		.input(
 			z.object({
 				text: z.string().min(1),
@@ -179,7 +179,7 @@ export const entryRouter = createTRPCRouter({
 			});
 		}),
 
-	delete: protectedProcedure
+	delete: consentedProcedure
 		.input(z.object({ id: z.number() }))
 		.mutation(async ({ ctx, input }) => {
 			const [deleted] = await ctx.db

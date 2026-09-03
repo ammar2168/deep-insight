@@ -12,6 +12,7 @@ import superjson from "superjson";
 import { ZodError } from "zod";
 
 import { auth } from "@/server/better-auth";
+import { hasCurrentConsent } from "@/server/consent";
 import { db } from "@/server/db";
 
 /**
@@ -151,3 +152,31 @@ export const protectedProcedure = t.procedure
 			},
 		});
 	});
+
+/**
+ * Consented procedure
+ *
+ * Everything that actually touches a user's data (capture, chat, reading
+ * insights) should use this instead of protectedProcedure directly — it adds
+ * one more check on top: that the signed-in user has accepted the current
+ * terms. `consent.accept`/`consent.status` and `settings.deleteAccount`
+ * deliberately stay on plain protectedProcedure — you must be able to see
+ * what you're agreeing to before agreeing to it, and delete your account
+ * regardless of consent status, not be blocked from leaving by a terms gate.
+ *
+ * code: "FORBIDDEN" with this exact message is what the client watches for to
+ * redirect to the consent screen instead of showing a generic error.
+ */
+export const CONSENT_REQUIRED_MESSAGE = "CONSENT_REQUIRED";
+
+export const consentedProcedure = protectedProcedure.use(
+	async ({ ctx, next }) => {
+		if (!(await hasCurrentConsent(ctx.session.user.id))) {
+			throw new TRPCError({
+				code: "FORBIDDEN",
+				message: CONSENT_REQUIRED_MESSAGE,
+			});
+		}
+		return next();
+	},
+);

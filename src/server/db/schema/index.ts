@@ -1,4 +1,5 @@
 export * from "./account";
+export * from "./consent";
 export * from "./encryption-key";
 export * from "./entry";
 export * from "./insight";

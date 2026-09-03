@@ -43,6 +43,13 @@
       "when": 1788355716753,
       "tag": "0005_warm_franklin_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788431063835,
+      "tag": "0006_sturdy_shape",
+      "breakpoints": true
     }
   ]
 }

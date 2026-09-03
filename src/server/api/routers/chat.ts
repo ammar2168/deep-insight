@@ -3,14 +3,14 @@ import { z } from "zod";
 
 import { answerQuestion } from "@/server/ai/insights";
 import { checkForCrisisSignal } from "@/server/ai/safety";
-import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
+import { consentedProcedure, createTRPCRouter } from "@/server/api/trpc";
 import { decryptManyForUser } from "@/server/crypto/envelope";
 import { insights } from "@/server/db/schema";
 
 const CONTEXT_INSIGHT_LIMIT = 50;
 
 export const chatRouter = createTRPCRouter({
-	ask: protectedProcedure
+	ask: consentedProcedure
 		.input(
 			z.object({
 				question: z.string().min(1),

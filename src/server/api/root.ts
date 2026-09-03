@@ -1,4 +1,5 @@
 import { chatRouter } from "@/server/api/routers/chat";
+import { consentRouter } from "@/server/api/routers/consent";
 import { entryRouter } from "@/server/api/routers/entry";
 import { insightRouter } from "@/server/api/routers/insight";
 import { settingsRouter } from "@/server/api/routers/settings";
@@ -14,6 +15,7 @@ export const appRouter = createTRPCRouter({
 	insight: insightRouter,
 	chat: chatRouter,
 	settings: settingsRouter,
+	consent: consentRouter,
 });
 
 // export type definition of API

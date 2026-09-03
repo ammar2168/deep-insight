@@ -2,9 +2,11 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { ConsentGate } from "@/app/_components/consent-gate";
 import { HomeInsights } from "@/app/_components/home-insights";
 import { auth } from "@/server/better-auth";
 import { getSession } from "@/server/better-auth/server";
+import { hasCurrentConsent } from "@/server/consent";
 import { api, HydrateClient } from "@/trpc/server";
 
 function AddPageIcon() {
@@ -119,6 +121,10 @@ export default async function Home() {
 				</div>
 			</main>
 		);
+	}
+
+	if (!(await hasCurrentConsent(session.user.id))) {
+		return <ConsentGate />;
 	}
 
 	void api.insight.latest.prefetch();
