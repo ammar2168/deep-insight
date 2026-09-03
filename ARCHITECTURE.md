@@ -1,6 +1,6 @@
 # Architecture: Deep Insights & Smart Chat
 
-A reference for how the backend actually works — the data model, the capture pipeline, encryption, and the two-tier trend-analysis engine ("Tier 1 / Tier 2") that powers chat's ability to answer questions about patterns over time, not just recent facts.
+A reference for how the backend actually works — the data model, the capture pipeline, encryption, consent, and the two-tier trend-analysis engine ("Tier 1 / Tier 2") that powers chat's ability to answer questions about patterns over time, not just recent facts.
 
 This describes what's built as of the `deep-insights-foundation` branch. Where something is deliberately not built yet, it says so explicitly rather than describing aspirational behavior.
 
@@ -78,7 +78,19 @@ Why two keys instead of one: if a database leak exposed a single shared master k
 
 ---
 
-## 4. Chat, the simple path
+## 4. Consent
+
+[`consent.ts`](src/server/consent.ts) + [`user_consent` schema](src/server/db/schema/consent.ts). A `consentedProcedure` — wraps `protectedProcedure` with one more check — is what every data-touching procedure uses (capture, chat, reading insights): no session, no consent record matching `CURRENT_TERMS_VERSION`, no call proceeds, including the ones that send data to a third-party AI. Enforced server-side, not just a UI gate a direct API call could skip.
+
+Two things deliberately stay on plain `protectedProcedure`, not `consentedProcedure`: `consent.status`/`consent.accept` (you must be able to see what you're agreeing to before agreeing to it), and `settings.deleteAccount` (leaving is never gated behind accepting terms someone doesn't want to accept).
+
+`user_consent` has no foreign key to `user` — the one deliberate exception to how every other table here is wired. It's an audit record that consent existed at the time data was processed, not a piece of the user's own data, so account deletion leaves it untouched instead of cascading it away. Bumping `CURRENT_TERMS_VERSION` invalidates every existing consent at once; anyone who accepted an older version is asked again next time.
+
+The home page checks consent alongside session, server-side, and renders a plain-language gate — what's stored, that a named third party (Anthropic's Claude) processes it, that deletion is available anytime — instead of the dashboard until accepted.
+
+---
+
+## 5. Chat, the simple path
 
 [`chat.ts`](src/server/api/routers/chat.ts) fetches the user's 50 most recent insights (decrypted), and calls `answerQuestion` in [`insights.ts`](src/server/ai/insights.ts). By default this is a single Claude call answering from that flat, recent-insight context — cheap, fast (2–3 seconds), no tool use.
 
@@ -86,7 +98,7 @@ This is deliberately *not* smart about trends. It's a flat recency window, and t
 
 ---
 
-## 5. Tier 1 — the index
+## 6. Tier 1 — the index
 
 [`timeline.ts`](src/server/insights/timeline.ts). One function that matters:
 
@@ -101,7 +113,7 @@ A second, narrower function, `getRawEntryText(userId, dates[])`, fetches full ra
 
 ---
 
-## 6. Tier 2 — flag, confirm, synthesize
+## 7. Tier 2 — flag, confirm, synthesize
 
 [`trends.ts`](src/server/ai/trends.ts) holds three LLM calls; [`trend-analysis.ts`](src/server/insights/trend-analysis.ts) orchestrates them into one function, `analyzeTrend(userId, question, {start, end})`, which is the only thing anything else ever calls.
 
@@ -124,7 +136,7 @@ analyzeTrend(userId, question, range)
 
 ---
 
-## 7. The tool-calling router — how chat decides simple vs. deep
+## 8. The tool-calling router — how chat decides simple vs. deep
 
 [`tool-loop.ts`](src/server/ai/tool-loop.ts) is a generic Claude tool-use loop — it has no idea what tools exist, it just calls the model, executes whatever tool it asks for, feeds the result back, and repeats (capped at 4 rounds, a hard bound on runaway cost) until a final text answer comes back.
 
@@ -134,7 +146,7 @@ This design is deliberately layered so a future upgrade — giving the model dir
 
 ---
 
-## 8. Traceability — locating a bad answer
+## 9. Traceability — locating a bad answer
 
 Every `analyzeTrend` call gets a short random trace ID, and every log line at every stage — Tier 1's fetch, Stage 1's flagging, Stage 2's confirmation, Stage 3's synthesis — carries it, along with the actual `entries.id`/`insights.id` involved. Given a trace ID from server logs, the full chain (which database rows fed the answer, what got flagged, what got confirmed or discarded, what got mechanically rejected as unverified) can be reconstructed without re-running anything.
 
@@ -142,7 +154,7 @@ Every `analyzeTrend` call gets a short random trace ID, and every log line at ev
 
 ---
 
-## 9. Explicitly not built yet
+## 10. Explicitly not built yet
 
 - **Scheduling/caching** — Tier 1/Tier 2 run fully on-demand, every time. A closed week is provably immutable (no edits after save), so precomputing and caching is safe whenever it's needed — just not built, since on-demand hasn't shown a latency/cost problem yet.
 - **Chat persistence** — conversations live only in browser state. On hold by product decision, not scheduled.
@@ -153,7 +165,7 @@ Since built: account deletion with a user-facing danger-zone confirm at `/settin
 
 ---
 
-## 10. How this was actually verified
+## 11. How this was actually verified
 
 Not just unit tests — every stage of this was tested against full, realistic synthetic datasets (seeded through the real encrypted pipeline, torn down after) run through the real production code, because the interesting failure modes here are specific to LLM behavior at scale, not classic logic bugs. A few of the concrete things this process actually caught, worth knowing about because they shaped the design:
 
