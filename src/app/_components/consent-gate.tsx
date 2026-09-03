@@ -43,8 +43,7 @@ export function ConsentGate() {
 				<p className="text-ink-600 text-sm">
 					Your data — the photos you upload, the text transcribed from them, and
 					the insights pulled from that text — is processed by us and by
-					third-party software we use, including Anthropic&rsquo;s Claude, to
-					read your handwriting and find patterns in what you write.
+					third-party software we use.
 				</p>
 				<p className="text-ink-600 text-sm">
 					It&rsquo;s encrypted and stored, and never shared with other users.
