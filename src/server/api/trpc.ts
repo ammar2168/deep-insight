@@ -44,15 +44,34 @@ export const createTRPCContext = async (opts: { headers: Headers }) => {
  * ZodErrors so that you get typesafety on the frontend if your procedure fails due to validation
  * errors on the backend.
  */
+const GENERIC_SERVER_ERROR_MESSAGE =
+	"Something went wrong on our end. Try again?";
+
 const t = initTRPC.context<typeof createTRPCContext>().create({
 	transformer: superjson,
 	errorFormatter({ shape, error }) {
+		const zodError =
+			error.cause instanceof ZodError ? error.cause.flatten() : null;
+
+		// Every procedure's own deliberate `throw new TRPCError(...)` sets no cause —
+		// only tRPC's own wrapping of a genuinely unexpected thrown value (a library
+		// internal, a DB hiccup) does, and it defaults that error's message onto this
+		// one verbatim. Without this check, whatever that library happened to say
+		// (Better Auth's "Failed to get session" is a real example this caught) goes
+		// straight to the user instead of a message anyone actually wrote for them.
+		const isUnexpectedInternalError =
+			error.code === "INTERNAL_SERVER_ERROR" &&
+			error.cause != null &&
+			!zodError;
+
 		return {
 			...shape,
+			message: isUnexpectedInternalError
+				? GENERIC_SERVER_ERROR_MESSAGE
+				: shape.message,
 			data: {
 				...shape.data,
-				zodError:
-					error.cause instanceof ZodError ? error.cause.flatten() : null,
+				zodError,
 			},
 		};
 	},
