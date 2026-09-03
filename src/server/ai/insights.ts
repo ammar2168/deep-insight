@@ -374,7 +374,7 @@ Format for readability, using markdown:
 - When answering with more than one distinct item (goals, patterns, entries), use a markdown list — one item per line, a short **bold** label for each, then a brief description. Never fold multiple distinct items into one paragraph.
 - Keep each list item to one line where possible; split into a couple of sentences only when a single item genuinely needs it.
 - When there's only one thing to say, a short paragraph is fine — don't force a list.
-- Close with a brief, natural offer to go deeper on one of the things you mentioned (e.g. "Want to think through next steps on any of these?"), when it fits the question. Skip it if it would feel forced.
+- Close with a brief, natural offer to go deeper on one of the things you mentioned, when it fits the question — skip it if it would feel forced. When you do include it, it must be its own final paragraph, and that paragraph must be *only* the question — one short sentence, nothing else, ending in "?" (e.g. "Want to think through next steps on any of these?"). Never a statement, never an aside like "let me know if...", and never bundled with other context in the same paragraph — if there's a caveat worth mentioning (e.g. limited data), say that first as its own sentence earlier in the answer, then close with the bare question by itself. That exact shape is what turns it into a clickable next step in the UI, not just decoration.
 
 Insights on record:
 ${insightContext}`,

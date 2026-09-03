@@ -79,6 +79,46 @@ function errorMessage(err: unknown, fallback: string) {
 	return err instanceof Error && err.message ? err.message : fallback;
 }
 
+function ArrowIcon() {
+	return (
+		<svg aria-hidden="true" height="12" viewBox="0 0 14 14" width="12">
+			<title>Ask this</title>
+			<path
+				d="M2 7 H12 M7.5 3 L12 7 L7.5 11"
+				fill="none"
+				stroke="currentColor"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+				strokeWidth="1.5"
+			/>
+		</svg>
+	);
+}
+
+/**
+ * The system prompt closes an answer with a brief, natural offer to go
+ * deeper — "when it fits the question... skip it if it would feel forced" —
+ * so it's not always there. When the last paragraph reads as one, split it
+ * out so it can render as a clickable next step instead of just prose the
+ * user has to retype themselves. Never treated as a claim to verify (it's
+ * UI structure, not a fact about the user's data) — worst case a heuristic
+ * miss just leaves it as plain trailing text, same as today.
+ */
+function extractFollowUp(answer: string): {
+	body: string;
+	followUp: string | null;
+} {
+	const paragraphs = answer.split(/\n\s*\n/);
+	const last = paragraphs[paragraphs.length - 1]?.trim();
+	if (paragraphs.length > 1 && last && last.length > 10 && last.endsWith("?")) {
+		return {
+			body: paragraphs.slice(0, -1).join("\n\n").trim(),
+			followUp: last,
+		};
+	}
+	return { body: answer, followUp: null };
+}
+
 function AnswerMarkdown({ text }: { text: string }) {
 	return (
 		<div className="text-ink-900 text-sm leading-relaxed [&>*+*]:mt-3">
@@ -235,37 +275,60 @@ export function ChatView() {
 						</div>
 					) : (
 						<ul className="flex flex-1 flex-col gap-6">
-							{messages.map((m, i) => (
-								<li
-									className={
-										i === 0
-											? "animate-[fold-in_0.4s_ease-out_backwards]"
-											: "animate-[fold-in_0.4s_ease-out_backwards] border-indigo-500/15 border-t pt-6"
-									}
-									key={m.id}
-								>
-									<p className="font-mono text-indigo-600 text-xs uppercase tracking-[0.15em]">
-										You asked
-									</p>
-									<p className="mt-1 font-semibold text-ink-900 text-lg">
-										{m.question}
-									</p>
-									{m.answer !== null ? (
-										<div className="mt-3 rounded-sm bg-paper-200 p-3">
-											<AnswerMarkdown text={m.answer} />
-										</div>
-									) : m.error !== null ? (
-										<p className="mt-3 rounded-sm bg-paper-200 p-3 text-ink-600 text-sm">
-											{m.error}
+							{messages.map((m, i) => {
+								const { body, followUp } =
+									m.answer !== null
+										? extractFollowUp(m.answer)
+										: { body: "", followUp: null };
+								return (
+									<li
+										className={
+											i === 0
+												? "animate-[fold-in_0.4s_ease-out_backwards]"
+												: "animate-[fold-in_0.4s_ease-out_backwards] border-indigo-500/15 border-t pt-6"
+										}
+										key={m.id}
+									>
+										<p className="font-mono text-indigo-600 text-xs uppercase tracking-[0.15em]">
+											You asked
 										</p>
-									) : (
-										<p className="mt-3 inline-flex items-center gap-2 rounded-sm bg-paper-200 p-3 text-ink-600 text-sm">
-											<SpinnerIcon />
-											Thinking…
+										<p className="mt-1 font-semibold text-ink-900 text-lg">
+											{m.question}
 										</p>
-									)}
-								</li>
-							))}
+										{m.answer !== null ? (
+											<div className="mt-3 flex flex-col gap-3 rounded-sm bg-paper-200 p-3">
+												<AnswerMarkdown text={body} />
+												{followUp && (
+													<button
+														className="inline-flex w-fit items-center gap-2 rounded-full bg-indigo-600 px-4 py-2 text-left text-paper-100 text-sm transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
+														onClick={() => {
+															// Deliberately not ask(followUp): echoing the model's own
+															// question back at it read as strange in testing ("looks
+															// like that got copy-pasted back to me") — a plain
+															// affirmative is unambiguous with the offer still right
+															// there in history, and reads naturally in the transcript.
+															ask("Yes, let's do that.");
+														}}
+														type="button"
+													>
+														{followUp}
+														<ArrowIcon />
+													</button>
+												)}
+											</div>
+										) : m.error !== null ? (
+											<p className="mt-3 rounded-sm bg-paper-200 p-3 text-ink-600 text-sm">
+												{m.error}
+											</p>
+										) : (
+											<p className="mt-3 inline-flex items-center gap-2 rounded-sm bg-paper-200 p-3 text-ink-600 text-sm">
+												<SpinnerIcon />
+												Thinking…
+											</p>
+										)}
+									</li>
+								);
+							})}
 						</ul>
 					)}
 
