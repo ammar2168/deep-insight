@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { ConsentGate } from "@/app/_components/consent-gate";
+import { EmailAuthForm } from "@/app/_components/email-auth-form";
 import { HomeInsights } from "@/app/_components/home-insights";
 import { auth } from "@/server/better-auth";
 import { getSession } from "@/server/better-auth/server";
@@ -118,6 +119,14 @@ export default async function Home() {
 							Sign in with GitHub
 						</button>
 					</form>
+
+					<div className="flex w-full items-center gap-3 text-ink-600 text-xs uppercase tracking-[0.15em]">
+						<span className="h-px flex-1 bg-indigo-500/20" />
+						or
+						<span className="h-px flex-1 bg-indigo-500/20" />
+					</div>
+
+					<EmailAuthForm />
 				</div>
 			</main>
 		);
