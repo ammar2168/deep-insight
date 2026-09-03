@@ -169,10 +169,14 @@ export async function flagCorrelationCandidates(
 
 	// Diagnostic, not just defensive: if the shape is ever wrong, say exactly what it
 	// actually was instead of failing later with an opaque "X is not a function" a few
-	// lines down with no way to tell what the model actually returned.
+	// lines down with no way to tell what the model actually returned. Shape only
+	// (type + top-level keys), never the values — those are derived from the user's
+	// own journal text.
 	if (!Array.isArray(result?.candidates)) {
 		console.error(
-			`[trend-analysis:${traceId}] flag tool returned a malformed shape: ${JSON.stringify(toolUse.input)} | stop_reason: ${response.stop_reason} | usage: ${JSON.stringify(response.usage)}`,
+			`[trend-analysis:${traceId}] flag tool returned a malformed shape: ` +
+				`typeof candidates=${typeof result?.candidates}, keys=${Object.keys(toolUse.input as object).join(",")} | ` +
+				`stop_reason: ${response.stop_reason} | usage: ${JSON.stringify(response.usage)}`,
 		);
 		throw new TRPCError({
 			code: "INTERNAL_SERVER_ERROR",

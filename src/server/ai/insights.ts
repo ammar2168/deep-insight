@@ -278,9 +278,11 @@ ${text}
 		// JSON into a shape that isn't a clean array, and casting alone won't catch
 		// that at runtime — surface it plainly instead of crashing downstream with
 		// an opaque "X.map is not a function" wherever the caller expects a list.
+		// Logs shape only, never the model's actual output — that output is derived
+		// from the user's own journal text.
 		console.error(
-			`[extractInsights] malformed tool response, stop_reason=${response.stop_reason}:`,
-			JSON.stringify(toolUse.input).slice(0, 500),
+			`[extractInsights] malformed tool response, stop_reason=${response.stop_reason}, ` +
+				`typeof insights=${typeof input.insights}, keys=${Object.keys(toolUse.input as object).join(",")}`,
 		);
 		throw new TRPCError({
 			code: "INTERNAL_SERVER_ERROR",
