@@ -55,18 +55,18 @@ const RECORD_TRANSCRIPTION_TOOL = {
 						raw_text: {
 							type: "string" as const,
 							description:
-								"The exact words from the page stating the date, copied verbatim (e.g. 'August 26th', 'Sept 3').",
+								"The exact words from the page stating the date, copied verbatim. Must itself contain a day-of-month number and/or a month (e.g. 'August 26th', 'Sept 3', '9/3'). Never a holiday name, season, or relative term with no number in it (e.g. 'Labor Day', 'Christmas', 'my birthday', 'last weekend') — those aren't dates on the page, they're words that would require you to go calculate one, which is exactly what this field must not do.",
 						},
 						resolved_date: {
 							type: "string" as const,
 							description:
-								"That date resolved to YYYY-MM-DD. Use today's date only to fill in a missing year or resolve a relative reference — never change what the page actually says.",
+								"The raw_text date resolved to YYYY-MM-DD. Use today's date ONLY to fill in a year the page left out (e.g. 'August 26th' with no year becomes the most recent August 26th). Never compute a date from a holiday name, season, or relative day term — if raw_text isn't already an explicit day-of-month, this field doesn't apply and the entry should be left out of this list entirely.",
 						},
 					},
 					required: ["raw_text", "resolved_date"],
 				},
 				description:
-					"Every date the writer uses to mark WHEN this entry (or a distinct section of it) was written — typically a header at the top of a page or paragraph, like a diary dateline. Do NOT include a date mentioned only in passing (an appointment, someone's birthday, a plan for next week) — only dates that mark the entry itself. If the page has no such dateline at all, return an empty array rather than guessing.",
+					"Every EXPLICIT date (a day-of-month, written as a number) the writer uses to mark WHEN this entry (or a distinct section of it) was written — typically a header at the top of a page or paragraph, like a diary dateline. Do NOT include a date mentioned only in passing (an appointment, someone's birthday, a plan for next week), and do NOT include holiday names, seasons, or relative terms ('Labor Day', 'the holidays', 'last Tuesday') even if they're clearly the entry's own dateline — only an actual day-of-month number counts. If the page has no such explicit dateline at all, return an empty array rather than computing or guessing one.",
 			},
 		},
 		required: ["transcription", "mentioned_dates"],
@@ -172,6 +172,14 @@ export async function extractTextFromPhotos(photos: Photo[]): Promise<{
 				typeof d.raw_text === "string" && typeof d.resolved_date === "string",
 		)
 		.filter((d) => text.toLowerCase().includes(d.raw_text.toLowerCase()))
+		// Prompt wording alone isn't enough to stop this: real-world testing caught the
+		// model treating "Labor Day weekend" (a holiday name, no date on the page at
+		// all) as a dateline and computing an actual calendar date for it — raw_text
+		// was still a genuine substring of the transcription, so the check above let it
+		// through. A real dateline always has a day-of-month digit somewhere in it; a
+		// holiday/season/relative name never does, so this catches the whole class
+		// mechanically instead of hoping every future phrasing gets prompted away.
+		.filter((d) => /\d/.test(d.raw_text))
 		.filter(
 			(d) =>
 				ISO_DATE.test(d.resolved_date) && isRealCalendarDate(d.resolved_date),
