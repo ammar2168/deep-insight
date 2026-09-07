@@ -70,7 +70,7 @@ decryptManyForUser(userId, ciphertexts[]): Promise<string[]>  // one key fetch, 
 
 Nothing outside this file knows what a DEK, an IV, or GCM is. That narrow surface is what makes it possible to change *how* or *where* the master key is stored later without touching a single caller.
 
-**The mechanism:** each user gets one randomly-generated 32-byte key (their DEK), created the first time they save anything. That DEK is what actually encrypts their `entry.text` and `insight.value`. The DEK itself is never stored in plaintext — it's encrypted ("wrapped") by a single app-wide **master key** and only the wrapped form lives in `user_encryption_key.wrappedDek`. The master key lives in `.env` as `MASTER_ENCRYPTION_KEY` (base64, 32 random bytes) — **local dev only**; prod does not have this variable set yet.
+**The mechanism:** each user gets one randomly-generated 32-byte key (their DEK), created the first time they save anything. That DEK is what actually encrypts their `entry.text` and `insight.value`. The DEK itself is never stored in plaintext — it's encrypted ("wrapped") by a single app-wide **master key** and only the wrapped form lives in `user_encryption_key.wrappedDek`. The master key lives as `MASTER_ENCRYPTION_KEY` (base64, 32 random bytes) — a separate, independently-generated value in dev (`.env`) and prod (Vercel env vars); the two are never the same key, and rotating one has no effect on the other's already-encrypted data.
 
 Why two keys instead of one: if a database leak exposed a single shared master key, every user's data would be readable at once, and deleting one user's data could never be truly final (the same key would still work on any stray backup of their old ciphertext). With per-user DEKs, destroying one user's key permanently shreds their data — even a lingering backup copy becomes unreadable garbage — without touching anyone else. A DB leak alone, without the master key, yields nothing but wrapped keys.
 
@@ -159,9 +159,9 @@ Every `analyzeTrend` call gets a short random trace ID, and every log line at ev
 - **Scheduling/caching** — Tier 1/Tier 2 run fully on-demand, every time. A closed week is provably immutable (no edits after save), so precomputing and caching is safe whenever it's needed — just not built, since on-demand hasn't shown a latency/cost problem yet.
 - **Chat persistence** — conversations live only in browser state. On hold by product decision, not scheduled.
 - **Data export** — `/settings` has a disabled placeholder button for it; the actual decrypt-and-download logic isn't built yet.
-- **Prod deployment of any of this** — dev and prod are intentionally out of sync; the plan is one batched migrate-and-deploy once this whole arc is done, not incremental prod pushes.
+- **CI** — no automated typecheck/lint/build gate on PRs yet.
 
-Since built: account deletion with a user-facing danger-zone confirm at `/settings` (the cascade-delete foundation this section used to just call "already correct" is now actually exercised by it), and a batch-backfill capture flow at `/capture/batch` for catching up on several days in one sitting.
+Since built: account deletion with a user-facing danger-zone confirm at `/settings` (the cascade-delete foundation this section used to just call "already correct" is now actually exercised by it), a batch-backfill capture flow at `/capture/batch` for catching up on several days in one sitting, and the first prod deployment of this whole arc (Vercel, auto-deploying off `main`; verified end to end live — sign-up, consent gate, dashboard, and chat including a real `analyze_trend` tool call).
 
 ---
 
