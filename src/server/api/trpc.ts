@@ -11,6 +11,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { ZodError } from "zod";
 
+import { isTrialExpired } from "@/server/access";
 import { auth } from "@/server/better-auth";
 import { hasCurrentConsent } from "@/server/consent";
 import { db } from "@/server/db";
@@ -154,6 +155,31 @@ export const protectedProcedure = t.procedure
 	});
 
 /**
+ * Trial-active procedure
+ *
+ * One layer below consentedProcedure: blocks a signed-in user whose free
+ * trial (src/server/access.ts, TRIAL_LENGTH_DAYS from account creation) has
+ * ended, regardless of consent status — an expired account can't proceed
+ * either way, so this is checked first. settings.deleteAccount deliberately
+ * skips this too, same reasoning as skipping consent: leaving never depends
+ * on trial status.
+ *
+ * code: "FORBIDDEN" with this exact message is what the client watches for to
+ * show the trial-ended screen instead of a generic error.
+ */
+export const TRIAL_EXPIRED_MESSAGE = "TRIAL_EXPIRED";
+
+const trialActiveProcedure = protectedProcedure.use(({ ctx, next }) => {
+	if (isTrialExpired(ctx.session.user.createdAt)) {
+		throw new TRPCError({
+			code: "FORBIDDEN",
+			message: TRIAL_EXPIRED_MESSAGE,
+		});
+	}
+	return next();
+});
+
+/**
  * Consented procedure
  *
  * Everything that actually touches a user's data (capture, chat, reading
@@ -169,7 +195,7 @@ export const protectedProcedure = t.procedure
  */
 export const CONSENT_REQUIRED_MESSAGE = "CONSENT_REQUIRED";
 
-export const consentedProcedure = protectedProcedure.use(
+export const consentedProcedure = trialActiveProcedure.use(
 	async ({ ctx, next }) => {
 		if (!(await hasCurrentConsent(ctx.session.user.id))) {
 			throw new TRPCError({

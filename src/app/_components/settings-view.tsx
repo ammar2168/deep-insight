@@ -46,6 +46,67 @@ function SpinnerIcon() {
 	);
 }
 
+function AccessCodeSection() {
+	const codeInputId = useId();
+	const [code, setCode] = useState("");
+	const [error, setError] = useState<string | null>(null);
+	const [redeemed, setRedeemed] = useState(false);
+	const redeemMutation = api.settings.redeemCode.useMutation();
+
+	async function handleRedeem(e: React.FormEvent) {
+		e.preventDefault();
+		setError(null);
+		try {
+			await redeemMutation.mutateAsync({ code });
+			setRedeemed(true);
+		} catch (err) {
+			setError(errorMessage(err, "Couldn't redeem that code. Try again?"));
+		}
+	}
+
+	return (
+		<section className="flex flex-col gap-3 rounded-sm bg-paper-100 p-6 text-ink-900 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.6)] sm:p-8">
+			<div>
+				<h2 className="font-semibold text-ink-900 text-lg">Have a code?</h2>
+				<p className="mt-1 text-ink-600 text-sm">
+					Raises your daily chat question limit.
+				</p>
+			</div>
+			{redeemed ? (
+				<p className="text-ink-600 text-sm">
+					Code applied — enjoy the extra room.
+				</p>
+			) : (
+				<form
+					className="flex flex-col gap-3 sm:flex-row"
+					onSubmit={handleRedeem}
+				>
+					<label className="sr-only" htmlFor={codeInputId}>
+						Access code
+					</label>
+					<input
+						className="flex-1 rounded-sm border border-indigo-500/20 bg-paper-200 px-3 py-2 text-[15px] text-ink-900 transition-colors focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+						id={codeInputId}
+						onChange={(e) => setCode(e.target.value)}
+						placeholder="Enter code"
+						type="text"
+						value={code}
+					/>
+					<button
+						className="inline-flex w-fit items-center gap-2 rounded-full bg-indigo-600 px-4 py-2 font-medium text-paper-100 text-xs transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+						disabled={code.trim().length === 0 || redeemMutation.isPending}
+						type="submit"
+					>
+						{redeemMutation.isPending && <SpinnerIcon />}
+						{redeemMutation.isPending ? "Checking…" : "Redeem"}
+					</button>
+				</form>
+			)}
+			{error && <p className="text-ink-600 text-sm">{error}</p>}
+		</section>
+	);
+}
+
 const DELETE_CONFIRM_PHRASE = "DELETE";
 
 function DeleteAccountSection() {
@@ -167,6 +228,8 @@ export function SettingsView() {
 						Settings
 					</h1>
 				</header>
+
+				<AccessCodeSection />
 
 				<section className="flex flex-col gap-3 rounded-sm bg-paper-100 p-6 text-ink-900 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.6)] sm:p-8">
 					<div>

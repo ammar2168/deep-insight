@@ -188,6 +188,19 @@ export function ChatView() {
 				setCrisisCheckIn(true);
 				return;
 			}
+			if (result.limitReached) {
+				setMessages((prev) =>
+					prev.map((m) =>
+						m.id === id
+							? {
+									...m,
+									error: `You've used today's ${result.dailyLimit} free questions — more tomorrow.`,
+								}
+							: m,
+					),
+				);
+				return;
+			}
 			setMessages((prev) =>
 				prev.map((m) => (m.id === id ? { ...m, answer: result.answer } : m)),
 			);

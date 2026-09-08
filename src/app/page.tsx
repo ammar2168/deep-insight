@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { ConsentGate } from "@/app/_components/consent-gate";
 import { EmailAuthForm } from "@/app/_components/email-auth-form";
 import { HomeInsights } from "@/app/_components/home-insights";
+import { TrialExpiredGate } from "@/app/_components/trial-expired-gate";
+import { isTrialExpired } from "@/server/access";
 import { auth } from "@/server/better-auth";
 import { getSession } from "@/server/better-auth/server";
 import { hasCurrentConsent } from "@/server/consent";
@@ -130,6 +132,10 @@ export default async function Home() {
 				</div>
 			</main>
 		);
+	}
+
+	if (isTrialExpired(session.user.createdAt)) {
+		return <TrialExpiredGate />;
 	}
 
 	if (!(await hasCurrentConsent(session.user.id))) {
