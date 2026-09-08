@@ -57,6 +57,13 @@
       "when": 1788880098930,
       "tag": "0007_hesitant_hitman",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788883441021,
+      "tag": "0008_ambitious_santa_claus",
+      "breakpoints": true
     }
   ]
 }

@@ -1,10 +1,9 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
-import { env } from "@/env";
 import { db } from "@/server/db";
-import { chatUsage } from "@/server/db/schema";
+import { accessCodes, chatUsage } from "@/server/db/schema";
 
 export const TRIAL_LENGTH_DAYS = 30;
 export const FREE_DAILY_CHAT_LIMIT = 3;
@@ -67,14 +66,28 @@ export async function tryConsumeChatQuestion(
 	return { allowed: true, limit };
 }
 
-/** True on a correct code, applied immediately. False (including on no code configured) changes nothing. */
+/**
+ * Single-use: a code works for whichever account redeems it first, and never
+ * again after — not a shared secret anyone who has it can use. The UPDATE's
+ * own WHERE (redeemedAt still null) is what actually enforces that atomically;
+ * two simultaneous redemption attempts on the same code both run this UPDATE,
+ * but only one can ever affect a row, since the loser's WHERE clause no
+ * longer matches once the winner's write lands. Checking "is it used" first
+ * with a separate SELECT and then writing would leave a real race window —
+ * this doesn't.
+ */
 export async function redeemAccessCode(
 	userId: string,
 	code: string,
 ): Promise<boolean> {
-	if (!env.SPECIAL_ACCESS_CODE || code !== env.SPECIAL_ACCESS_CODE) {
-		return false;
-	}
+	const [claimed] = await db
+		.update(accessCodes)
+		.set({ redeemedAt: new Date(), redeemedByUserId: userId })
+		.where(and(eq(accessCodes.code, code), isNull(accessCodes.redeemedAt)))
+		.returning();
+
+	if (!claimed) return false;
+
 	await db
 		.insert(chatUsage)
 		.values({ userId, usageDate: todayUTC(), codeRedeemed: true })

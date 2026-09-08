@@ -13,6 +13,7 @@
 		"db:push": "drizzle-kit push",
 		"db:studio": "drizzle-kit studio",
 		"dev": "next dev --turbo",
+		"generate-code": "node scripts/generate-access-code.mjs",
 		"preview": "next build && next start",
 		"start": "next start",
 		"test": "vitest run",
