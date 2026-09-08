@@ -35,20 +35,22 @@ export function ConsentGate() {
 					Before you continue
 				</p>
 				<h1 className="font-semibold text-2xl text-ink-900">
-					Quick, honest note about your data
+					Quick note about your data
 				</h1>
 				<p className="text-ink-600 text-sm">
 					Your data — the photos you upload, the text transcribed from them, and
 					the insights pulled from that text — is processed by us and by
 					Anthropic&rsquo;s Claude, which we use to read your photos and find
-					patterns in what you write.
+					patterns in what you write. We don&rsquo;t attach your name or account
+					details to what&rsquo;s sent for processing.
 				</p>
 				<p className="text-ink-600 text-sm">
 					It&rsquo;s encrypted and stored, and never shared with other users.
 				</p>
 				<p className="text-ink-600 text-sm">
-					Deleting your account removes everything we store, immediately. What
-					was already sent to Claude for processing is handled separately, under{" "}
+					Deleting your account removes everything we store, immediately. We
+					can&rsquo;t delete what&rsquo;s already been sent to Claude for
+					processing — check{" "}
 					<a
 						className="underline decoration-indigo-500/40 underline-offset-2"
 						href="https://www.anthropic.com/legal/privacy"
@@ -56,8 +58,8 @@ export function ConsentGate() {
 						target="_blank"
 					>
 						Anthropic&rsquo;s own data policy
-					</a>
-					, not ours.
+					</a>{" "}
+					for how they handle it from there.
 				</p>
 				<p className="text-ink-600 text-sm">
 					You can ask us to delete all of it, at any time, from Settings.

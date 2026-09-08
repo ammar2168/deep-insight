@@ -161,7 +161,7 @@ Every `analyzeTrend` call gets a short random trace ID, and every log line at ev
 - **Data export** — `/settings` has a disabled placeholder button for it; the actual decrypt-and-download logic isn't built yet.
 - **CI** — no automated typecheck/lint/build gate on PRs yet.
 
-Since built: account deletion with a user-facing danger-zone confirm at `/settings` (the cascade-delete foundation this section used to just call "already correct" is now actually exercised by it), a batch-backfill capture flow at `/capture/batch` for catching up on several days in one sitting, and the first prod deployment of this whole arc (Vercel, auto-deploying off `main`; verified end to end live — sign-up, consent gate, dashboard, and chat including a real `analyze_trend` tool call).
+Since built: account deletion with a user-facing confirm at `/settings` (the cascade-delete foundation this section used to just call "already correct" is now actually exercised by it), a batch-backfill capture flow at `/capture/batch` for catching up on several days in one sitting, and the first prod deployment of this whole arc (Vercel, auto-deploying off `main`; verified end to end live — sign-up, consent gate, dashboard, and chat including a real `analyze_trend` tool call). `vercel.json` now conditions the build command on `$VERCEL_ENV`: a production build runs `drizzle-kit migrate` against the real database before `next build`, so a merge to `main` is the only step anyone ever takes — no separate manual migration command. Preview/development builds skip it untouched.
 
 ---
 

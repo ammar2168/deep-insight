@@ -1,6 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
+import { tryConsumeChatQuestion } from "@/server/access";
 import { answerQuestion } from "@/server/ai/insights";
 import { checkForCrisisSignal } from "@/server/ai/safety";
 import { consentedProcedure, createTRPCRouter } from "@/server/api/trpc";
@@ -20,13 +21,36 @@ export const chatRouter = createTRPCRouter({
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
-			// Runs before anything else: a flagged question never reaches the model for a
-			// normal answer. The client shows CrisisCheckInModal instead of an answer bubble.
+			// Runs before anything else, including the daily question limit below: a
+			// flagged question always gets the crisis check-in regardless of remaining
+			// budget — safety takes priority over cost control here, on purpose. Never
+			// "optimize" this by moving the limit check first.
 			if (await checkForCrisisSignal(input.question)) {
 				console.warn(
 					`[safety] crisis signal flagged in chat.ask for user ${ctx.session.user.id}`,
 				);
-				return { answer: null, crisis: true as const };
+				return {
+					answer: null,
+					crisis: true as const,
+					limitReached: false as const,
+				};
+			}
+
+			const { allowed, limit, codeRedeemed } = await tryConsumeChatQuestion(
+				ctx.session.user.id,
+			);
+			if (!allowed) {
+				return {
+					answer: null,
+					crisis: false as const,
+					limitReached: true as const,
+					dailyLimit: limit,
+					// Lets the client decide whether "have a code?" even makes sense to
+					// show — someone who already redeemed one and hit the boosted
+					// ceiling has nothing left to enter, that prompt is only for
+					// someone still on the free tier.
+					codeRedeemed,
+				};
 			}
 
 			const recentInsights = await ctx.db.query.insights.findMany({
@@ -51,6 +75,6 @@ export const chatRouter = createTRPCRouter({
 				input.history,
 			);
 
-			return { answer, crisis: false as const };
+			return { answer, crisis: false as const, limitReached: false as const };
 		}),
 });

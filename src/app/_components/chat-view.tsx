@@ -14,6 +14,12 @@ type Message = {
 	question: string;
 	answer: string | null;
 	error: string | null;
+	limitReached: boolean;
+	// Only meaningful when limitReached is true — false either when there's no
+	// limit involved at all, or when the user already redeemed a code and is
+	// blocked at the boosted ceiling, where offering "have a code?" again
+	// wouldn't make sense (they've got nothing left to enter).
+	canRedeemCode: boolean;
 };
 
 const SUGGESTIONS = [
@@ -175,7 +181,14 @@ export function ChatView() {
 		const id = crypto.randomUUID();
 		setMessages((prev) => [
 			...prev,
-			{ id, question: q, answer: null, error: null },
+			{
+				id,
+				question: q,
+				answer: null,
+				error: null,
+				limitReached: false,
+				canRedeemCode: false,
+			},
 		]);
 		setQuestion("");
 
@@ -186,6 +199,21 @@ export function ChatView() {
 				// again — show the check-in instead, nothing about it stays on screen.
 				setMessages((prev) => prev.filter((m) => m.id !== id));
 				setCrisisCheckIn(true);
+				return;
+			}
+			if (result.limitReached) {
+				setMessages((prev) =>
+					prev.map((m) =>
+						m.id === id
+							? {
+									...m,
+									error: `You've used today's ${result.dailyLimit} free questions — more tomorrow.`,
+									limitReached: true,
+									canRedeemCode: !result.codeRedeemed,
+								}
+							: m,
+					),
+				);
 				return;
 			}
 			setMessages((prev) =>
@@ -237,14 +265,9 @@ export function ChatView() {
 						<BackIcon />
 						Home
 					</Link>
-					<div>
-						<p className="font-mono text-indigo-400 text-xs uppercase tracking-[0.2em]">
-							Go deeper
-						</p>
-						<h1 className="mt-1 font-bold text-3xl text-paper-100 sm:text-4xl">
-							Ask about your insights
-						</h1>
-					</div>
+					<h1 className="font-bold text-3xl text-paper-100 sm:text-4xl">
+						Go deeper. Reflect on your insights
+					</h1>
 				</header>
 
 				<section
@@ -314,9 +337,21 @@ export function ChatView() {
 												)}
 											</div>
 										) : m.error !== null ? (
-											<p className="mt-3 rounded-sm bg-paper-200 p-3 text-ink-600 text-sm">
-												{m.error}
-											</p>
+											<div className="mt-3 flex flex-col gap-1.5 rounded-sm bg-paper-200 p-3 text-ink-600 text-sm">
+												<p>{m.error}</p>
+												{m.canRedeemCode && (
+													<p>
+														Have a code?{" "}
+														<Link
+															className="underline decoration-indigo-500/40 underline-offset-2"
+															href="/settings"
+														>
+															Enter it in Settings
+														</Link>
+														.
+													</p>
+												)}
+											</div>
 										) : (
 											<p className="mt-3 inline-flex items-center gap-2 rounded-sm bg-paper-200 p-3 text-ink-600 text-sm">
 												<SpinnerIcon />
@@ -356,6 +391,16 @@ export function ChatView() {
 							Ask
 						</button>
 					</form>
+
+					{messages.length > 0 && (
+						<Link
+							className="mt-6 inline-flex w-fit items-center gap-1.5 self-center text-ink-600 text-sm underline decoration-indigo-500/40 underline-offset-4 hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
+							href="/"
+						>
+							<BackIcon />
+							Back to insights
+						</Link>
+					)}
 				</section>
 			</div>
 		</main>
