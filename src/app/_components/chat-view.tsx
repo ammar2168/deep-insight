@@ -369,6 +369,16 @@ export function ChatView() {
 							Ask
 						</button>
 					</form>
+
+					{messages.length > 0 && (
+						<Link
+							className="mt-6 inline-flex w-fit items-center gap-1.5 self-center text-ink-600 text-sm underline decoration-indigo-500/40 underline-offset-4 hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
+							href="/"
+						>
+							<BackIcon />
+							Back to insights
+						</Link>
+					)}
 				</section>
 			</div>
 		</main>
