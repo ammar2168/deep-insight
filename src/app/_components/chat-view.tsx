@@ -6,6 +6,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import Markdown from "react-markdown";
 
 import { CrisisCheckInModal } from "@/app/_components/crisis-check-in-modal";
+import { errorMessage } from "@/lib/error-message";
 import { api } from "@/trpc/react";
 
 type Message = {
@@ -73,10 +74,6 @@ function SpinnerIcon() {
 			/>
 		</svg>
 	);
-}
-
-function errorMessage(err: unknown, fallback: string) {
-	return err instanceof Error && err.message ? err.message : fallback;
 }
 
 function ArrowIcon() {
