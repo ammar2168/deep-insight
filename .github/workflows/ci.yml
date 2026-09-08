@@ -28,6 +28,9 @@ jobs:
       # Throwaway — scoped to a Postgres container that's destroyed at the end
       # of this job, protects nothing real. Not the same key as dev or prod.
       MASTER_ENCRYPTION_KEY: "+pmaIMe0PdM8gqVrekcdICv9kvq59/FoWF+E4w0NeDo="
+      # Same reasoning — lets the code-redemption test actually exercise a
+      # real match instead of skipping. Not the same code as prod.
+      SPECIAL_ACCESS_CODE: "ci-test-code"
     steps:
       - uses: actions/checkout@v4
 

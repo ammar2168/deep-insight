@@ -50,6 +50,13 @@
       "when": 1788431063835,
       "tag": "0006_sturdy_shape",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788880098930,
+      "tag": "0007_hesitant_hitman",
+      "breakpoints": true
     }
   ]
 }

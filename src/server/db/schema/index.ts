@@ -1,4 +1,5 @@
 export * from "./account";
+export * from "./chat-usage";
 export * from "./consent";
 export * from "./encryption-key";
 export * from "./entry";

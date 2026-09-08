@@ -22,6 +22,10 @@ export const env = createEnv({
 		// key — never used to encrypt entry content directly. Optional for the same
 		// reason as ANTHROPIC_API_KEY: routes that need it fail clearly at call time.
 		MASTER_ENCRYPTION_KEY: z.string().optional(),
+		// A single shared secret handed out to specific people, not a per-user code —
+		// entering it raises that account's daily chat-question limit. Optional: if
+		// unset, redemption always fails rather than the app refusing to boot.
+		SPECIAL_ACCESS_CODE: z.string().optional(),
 		NODE_ENV: z
 			.enum(["development", "test", "production"])
 			.default("development"),
@@ -49,6 +53,7 @@ export const env = createEnv({
 		DATABASE_URL: process.env.DATABASE_URL,
 		ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
 		MASTER_ENCRYPTION_KEY: process.env.MASTER_ENCRYPTION_KEY,
+		SPECIAL_ACCESS_CODE: process.env.SPECIAL_ACCESS_CODE,
 		NODE_ENV: process.env.NODE_ENV,
 	},
 	/**
