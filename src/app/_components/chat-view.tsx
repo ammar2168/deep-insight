@@ -252,14 +252,9 @@ export function ChatView() {
 						<BackIcon />
 						Home
 					</Link>
-					<div>
-						<p className="font-mono text-indigo-400 text-xs uppercase tracking-[0.2em]">
-							Go deeper
-						</p>
-						<h1 className="mt-1 font-bold text-3xl text-paper-100 sm:text-4xl">
-							Ask about your insights
-						</h1>
-					</div>
+					<h1 className="font-bold text-3xl text-paper-100 sm:text-4xl">
+						Go deeper and reflect on your insights
+					</h1>
 				</header>
 
 				<section
