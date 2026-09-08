@@ -14,6 +14,7 @@ type Message = {
 	question: string;
 	answer: string | null;
 	error: string | null;
+	limitReached: boolean;
 };
 
 const SUGGESTIONS = [
@@ -175,7 +176,7 @@ export function ChatView() {
 		const id = crypto.randomUUID();
 		setMessages((prev) => [
 			...prev,
-			{ id, question: q, answer: null, error: null },
+			{ id, question: q, answer: null, error: null, limitReached: false },
 		]);
 		setQuestion("");
 
@@ -195,6 +196,7 @@ export function ChatView() {
 							? {
 									...m,
 									error: `You've used today's ${result.dailyLimit} free questions — more tomorrow.`,
+									limitReached: true,
 								}
 							: m,
 					),
@@ -327,9 +329,21 @@ export function ChatView() {
 												)}
 											</div>
 										) : m.error !== null ? (
-											<p className="mt-3 rounded-sm bg-paper-200 p-3 text-ink-600 text-sm">
-												{m.error}
-											</p>
+											<div className="mt-3 flex flex-col gap-1.5 rounded-sm bg-paper-200 p-3 text-ink-600 text-sm">
+												<p>{m.error}</p>
+												{m.limitReached && (
+													<p>
+														Have a code?{" "}
+														<Link
+															className="underline decoration-indigo-500/40 underline-offset-2"
+															href="/settings"
+														>
+															Enter it in Settings
+														</Link>
+														.
+													</p>
+												)}
+											</div>
 										) : (
 											<p className="mt-3 inline-flex items-center gap-2 rounded-sm bg-paper-200 p-3 text-ink-600 text-sm">
 												<SpinnerIcon />
