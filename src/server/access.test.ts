@@ -75,6 +75,18 @@ describe("chat usage limits, against a real database", () => {
 		const result = await tryConsumeChatQuestion(userId);
 		expect(result.allowed).toBe(true);
 		expect(result.limit).toBe(BOOSTED_DAILY_CHAT_LIMIT);
+		expect(result.codeRedeemed).toBe(true);
+
+		// The scenario the client uses this flag for: once a code-redeemed
+		// account is blocked too, codeRedeemed must still read true, so the
+		// client can tell "nothing left to enter" apart from "hasn't tried a
+		// code yet" and stop offering the redemption prompt.
+		for (let i = result.limit - 1; i > 0; i--) {
+			await tryConsumeChatQuestion(userId);
+		}
+		const blockedAfterBoosted = await tryConsumeChatQuestion(userId);
+		expect(blockedAfterBoosted.allowed).toBe(false);
+		expect(blockedAfterBoosted.codeRedeemed).toBe(true);
 	});
 });
 

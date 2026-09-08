@@ -27,23 +27,24 @@ function todayUTC(): string {
  * under-count. Resets the count first if the stored date has rolled past
  * today (UTC) — a fresh calendar day always starts the budget over.
  */
-export async function tryConsumeChatQuestion(
-	userId: string,
-): Promise<{ allowed: boolean; limit: number }> {
+export async function tryConsumeChatQuestion(userId: string): Promise<{
+	allowed: boolean;
+	limit: number;
+	codeRedeemed: boolean;
+}> {
 	const today = todayUTC();
 
 	const existing = await db.query.chatUsage.findFirst({
 		where: eq(chatUsage.userId, userId),
 	});
 
-	const limit = existing?.codeRedeemed
-		? BOOSTED_DAILY_CHAT_LIMIT
-		: FREE_DAILY_CHAT_LIMIT;
+	const codeRedeemed = existing?.codeRedeemed ?? false;
+	const limit = codeRedeemed ? BOOSTED_DAILY_CHAT_LIMIT : FREE_DAILY_CHAT_LIMIT;
 	const questionsSoFar =
 		existing && existing.usageDate === today ? existing.questionsToday : 0;
 
 	if (questionsSoFar >= limit) {
-		return { allowed: false, limit };
+		return { allowed: false, limit, codeRedeemed };
 	}
 
 	if (!existing) {
@@ -63,7 +64,7 @@ export async function tryConsumeChatQuestion(
 			.where(eq(chatUsage.userId, userId));
 	}
 
-	return { allowed: true, limit };
+	return { allowed: true, limit, codeRedeemed };
 }
 
 /**

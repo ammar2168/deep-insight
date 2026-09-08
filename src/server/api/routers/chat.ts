@@ -36,7 +36,7 @@ export const chatRouter = createTRPCRouter({
 				};
 			}
 
-			const { allowed, limit } = await tryConsumeChatQuestion(
+			const { allowed, limit, codeRedeemed } = await tryConsumeChatQuestion(
 				ctx.session.user.id,
 			);
 			if (!allowed) {
@@ -45,6 +45,11 @@ export const chatRouter = createTRPCRouter({
 					crisis: false as const,
 					limitReached: true as const,
 					dailyLimit: limit,
+					// Lets the client decide whether "have a code?" even makes sense to
+					// show — someone who already redeemed one and hit the boosted
+					// ceiling has nothing left to enter, that prompt is only for
+					// someone still on the free tier.
+					codeRedeemed,
 				};
 			}
 

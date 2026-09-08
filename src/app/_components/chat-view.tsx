@@ -15,6 +15,11 @@ type Message = {
 	answer: string | null;
 	error: string | null;
 	limitReached: boolean;
+	// Only meaningful when limitReached is true — false either when there's no
+	// limit involved at all, or when the user already redeemed a code and is
+	// blocked at the boosted ceiling, where offering "have a code?" again
+	// wouldn't make sense (they've got nothing left to enter).
+	canRedeemCode: boolean;
 };
 
 const SUGGESTIONS = [
@@ -176,7 +181,14 @@ export function ChatView() {
 		const id = crypto.randomUUID();
 		setMessages((prev) => [
 			...prev,
-			{ id, question: q, answer: null, error: null, limitReached: false },
+			{
+				id,
+				question: q,
+				answer: null,
+				error: null,
+				limitReached: false,
+				canRedeemCode: false,
+			},
 		]);
 		setQuestion("");
 
@@ -197,6 +209,7 @@ export function ChatView() {
 									...m,
 									error: `You've used today's ${result.dailyLimit} free questions — more tomorrow.`,
 									limitReached: true,
+									canRedeemCode: !result.codeRedeemed,
 								}
 							: m,
 					),
@@ -253,7 +266,7 @@ export function ChatView() {
 						Home
 					</Link>
 					<h1 className="font-bold text-3xl text-paper-100 sm:text-4xl">
-						Go deeper and reflect on your insights
+						Go deeper. Reflect on your insights
 					</h1>
 				</header>
 
@@ -326,7 +339,7 @@ export function ChatView() {
 										) : m.error !== null ? (
 											<div className="mt-3 flex flex-col gap-1.5 rounded-sm bg-paper-200 p-3 text-ink-600 text-sm">
 												<p>{m.error}</p>
-												{m.limitReached && (
+												{m.canRedeemCode && (
 													<p>
 														Have a code?{" "}
 														<Link
