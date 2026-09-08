@@ -13,6 +13,18 @@ export const auth = betterAuth({
 	emailAndPassword: {
 		enabled: true,
 	},
+	// Email/password exists as an alternative door to the same person, not a
+	// separate identity system — someone who signs up with password and later
+	// hits "Sign in with GitHub" using the same address should land in one
+	// account, not get rejected. The default (requireLocalEmailVerified: true)
+	// blocks that, since this app has no email verification step for the
+	// password account to have satisfied. Safe to relax for a small,
+	// personally-invited beta; revisit if signup ever opens up publicly.
+	account: {
+		accountLinking: {
+			requireLocalEmailVerified: false,
+		},
+	},
 	socialProviders: {
 		github: {
 			clientId: env.BETTER_AUTH_GITHUB_CLIENT_ID,
