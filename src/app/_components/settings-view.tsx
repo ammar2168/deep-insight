@@ -251,7 +251,6 @@ export function SettingsView() {
 				</section>
 
 				<section className="flex flex-col gap-3 rounded-sm bg-paper-100 p-6 text-ink-900 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.6)] sm:p-8">
-					<h2 className="font-semibold text-ink-900 text-lg">Danger zone</h2>
 					<DeleteAccountSection />
 				</section>
 			</div>
