@@ -43,7 +43,7 @@ function HeroFoldMotif() {
 	return (
 		<svg
 			aria-hidden="true"
-			className="pointer-events-none absolute top-1/2 right-0 h-[340px] w-[340px] translate-x-1/4 -translate-y-1/2 sm:translate-x-1/6"
+			className="pointer-events-none absolute right-0 bottom-0 h-[220px] w-[220px] translate-x-1/4 translate-y-1/4 sm:h-[340px] sm:w-[340px] sm:translate-x-1/6"
 			viewBox="0 0 340 340"
 		>
 			<title>Decorative fold motif</title>
@@ -157,16 +157,11 @@ export default async function Home() {
 					<section className="relative animate-[fold-in_0.5s_ease-out] overflow-hidden rounded-sm border-indigo-500 border-b pb-8 motion-reduce:animate-none">
 						<HeroFoldMotif />
 						<header className="relative flex items-start justify-between gap-4">
-							<div>
-								<p className="font-mono text-indigo-400 text-xs uppercase tracking-[0.2em]">
-									Since you last opened this
-								</p>
-								<h1 className="mt-1 font-bold text-3xl text-paper-100 leading-tight sm:text-4xl">
-									{session.user?.name
-										? `Hi ${session.user.name.split(" ")[0]}`
-										: "Hi there"}
-								</h1>
-							</div>
+							<h1 className="font-bold text-3xl text-paper-100 leading-tight sm:text-4xl">
+								{session.user?.name
+									? `Hi ${session.user.name.split(" ")[0]}`
+									: "Hi there"}
+							</h1>
 							<div className="flex shrink-0 items-center gap-4">
 								<Link
 									className="whitespace-nowrap text-indigo-400 text-sm underline decoration-indigo-500/40 underline-offset-4 hover:text-paper-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
