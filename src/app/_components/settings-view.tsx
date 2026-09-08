@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 
+import { errorMessage } from "@/lib/error-message";
 import { authClient } from "@/server/better-auth/client";
 import { api } from "@/trpc/react";
 
@@ -43,10 +44,6 @@ function SpinnerIcon() {
 			/>
 		</svg>
 	);
-}
-
-function errorMessage(err: unknown, fallback: string) {
-	return err instanceof Error && err.message ? err.message : fallback;
 }
 
 const DELETE_CONFIRM_PHRASE = "DELETE";

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useId, useState } from "react";
 import { CrisisCheckInModal } from "@/app/_components/crisis-check-in-modal";
+import { errorMessage } from "@/lib/error-message";
 import type { RouterOutputs } from "@/trpc/react";
 import { api } from "@/trpc/react";
 
@@ -56,18 +57,44 @@ export function createPhotosFromFiles(files: FileList): Photo[] {
 	}));
 }
 
-function fileToDataUrl(file: File): Promise<string> {
-	return new Promise((resolve, reject) => {
-		const reader = new FileReader();
-		reader.onload = () => resolve(reader.result as string);
-		reader.onerror = () =>
-			reject(reader.error ?? new Error("Couldn't read file"));
-		reader.readAsDataURL(file);
-	});
-}
+const MAX_PHOTO_DIMENSION = 1600;
+const PHOTO_JPEG_QUALITY = 0.82;
 
-function errorMessage(err: unknown, fallback: string) {
-	return err instanceof Error && err.message ? err.message : fallback;
+/**
+ * Downscales and re-encodes a photo before it's sent to the server. A real
+ * phone photo is often several MB, and base64 adds ~33% on top of that —
+ * comfortably enough to exceed Vercel's request body size limit, which fails
+ * with a plain-text "Request Entity Too Large" response instead of JSON (the
+ * client then chokes trying to parse it). 1600px on the long side is far more
+ * than the OCR step needs to read handwriting accurately.
+ */
+function fileToCompressedDataUrl(file: File): Promise<string> {
+	return new Promise((resolve, reject) => {
+		const objectUrl = URL.createObjectURL(file);
+		const img = new Image();
+		img.onload = () => {
+			URL.revokeObjectURL(objectUrl);
+			const scale = Math.min(
+				1,
+				MAX_PHOTO_DIMENSION / Math.max(img.naturalWidth, img.naturalHeight),
+			);
+			const canvas = document.createElement("canvas");
+			canvas.width = Math.round(img.naturalWidth * scale);
+			canvas.height = Math.round(img.naturalHeight * scale);
+			const ctx = canvas.getContext("2d");
+			if (!ctx) {
+				reject(new Error("Couldn't process that photo"));
+				return;
+			}
+			ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+			resolve(canvas.toDataURL("image/jpeg", PHOTO_JPEG_QUALITY));
+		};
+		img.onerror = () => {
+			URL.revokeObjectURL(objectUrl);
+			reject(new Error("Couldn't read that photo"));
+		};
+		img.src = objectUrl;
+	});
 }
 
 /** Local calendar date as YYYY-MM-DD — never toISOString(), which converts to UTC first. */
@@ -399,8 +426,11 @@ export function DayCapture({
 		try {
 			const photoInputs = await Promise.all(
 				photos.map(async (p) => ({
-					base64: await fileToDataUrl(p.file),
-					mediaType: p.file.type,
+					base64: await fileToCompressedDataUrl(p.file),
+					// Always JPEG now, regardless of the source file's original
+					// format — that's what the canvas re-encode above actually
+					// produces, and it's what the bytes being sent really are.
+					mediaType: "image/jpeg",
 				})),
 			);
 			const result = await extractTextMutation.mutateAsync({

@@ -3,11 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 
+import { errorMessage } from "@/lib/error-message";
 import { authClient } from "@/server/better-auth/client";
-
-function errorMessage(err: unknown, fallback: string) {
-	return err instanceof Error && err.message ? err.message : fallback;
-}
 
 export function EmailAuthForm() {
 	const router = useRouter();
