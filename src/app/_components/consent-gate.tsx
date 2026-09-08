@@ -35,7 +35,7 @@ export function ConsentGate() {
 					Before you continue
 				</p>
 				<h1 className="font-semibold text-2xl text-ink-900">
-					Quick, honest note about your data
+					Quick note about your data
 				</h1>
 				<p className="text-ink-600 text-sm">
 					Your data — the photos you upload, the text transcribed from them, and
