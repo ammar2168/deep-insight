@@ -8,6 +8,26 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: journalling_app_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      SKIP_ENV_VALIDATION: true
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/journalling_app_test
+      # Throwaway — scoped to a Postgres container that's destroyed at the end
+      # of this job, protects nothing real. Not the same key as dev or prod.
+      MASTER_ENCRYPTION_KEY: "+pmaIMe0PdM8gqVrekcdICv9kvq59/FoWF+E4w0NeDo="
     steps:
       - uses: actions/checkout@v4
 
@@ -24,6 +44,8 @@ jobs:
 
       - run: pnpm check
 
+      - run: pnpm db:migrate
+
+      - run: pnpm test
+
       - run: pnpm build
-        env:
-          SKIP_ENV_VALIDATION: true
