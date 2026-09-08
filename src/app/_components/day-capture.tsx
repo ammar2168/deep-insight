@@ -12,12 +12,11 @@ type StageId = "sheet" | "crease" | "form";
 const STAGES: {
 	id: StageId;
 	number: string;
-	label: string;
 	verb: string;
 }[] = [
-	{ id: "sheet", number: "01", label: "The Flat Sheet", verb: "Capture" },
-	{ id: "crease", number: "02", label: "The Crease Sequence", verb: "Correct" },
-	{ id: "form", number: "03", label: "The Standing Form", verb: "Confirm" },
+	{ id: "sheet", number: "01", verb: "Capture" },
+	{ id: "crease", number: "02", verb: "Correct" },
+	{ id: "form", number: "03", verb: "Confirm insights" },
 ];
 
 export type Photo = { id: string; name: string; url: string; file: File };
@@ -660,9 +659,8 @@ export function DayCapture({
 											state === "pending" ? "text-indigo-400" : "text-paper-100"
 										}`}
 									>
-										{s.label}
+										{s.verb}
 									</p>
-									<p className="text-indigo-400 text-xs">{s.verb}</p>
 								</div>
 							</li>
 						);
@@ -678,10 +676,10 @@ export function DayCapture({
 					} motion-reduce:transition-none`}
 				>
 					<p className="font-mono text-ink-600 text-xs uppercase tracking-[0.15em]">
-						{stage.number} · {stage.verb}
+						{stage.number}
 					</p>
 					<h2 className="mt-1 font-semibold text-ink-900 text-xl">
-						{stage.label}
+						{stage.verb}
 					</h2>
 
 					{stage.id === "sheet" && (
