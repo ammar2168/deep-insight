@@ -164,14 +164,14 @@ export default async function Home() {
 							</h1>
 							<div className="flex shrink-0 items-center gap-4">
 								<Link
-									className="whitespace-nowrap text-indigo-400 text-sm underline decoration-indigo-500/40 underline-offset-4 hover:text-paper-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
+									className="whitespace-nowrap text-indigo-400 text-sm underline decoration-indigo-500/40 underline-offset-4 hover:text-paper-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400 focus-visible:outline-offset-2"
 									href="/settings"
 								>
 									Settings
 								</Link>
 								<form>
 									<button
-										className="whitespace-nowrap text-indigo-400 text-sm underline decoration-indigo-500/40 underline-offset-4 hover:text-paper-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
+										className="whitespace-nowrap text-indigo-400 text-sm underline decoration-indigo-500/40 underline-offset-4 hover:text-paper-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400 focus-visible:outline-offset-2"
 										formAction={async () => {
 											"use server";
 											await auth.api.signOut({
@@ -188,7 +188,7 @@ export default async function Home() {
 						</header>
 
 						<Link
-							className="relative mt-6 inline-flex items-center justify-center gap-2 rounded-full bg-indigo-600 px-7 py-4 font-medium text-lg text-paper-100 shadow-[0_14px_30px_-16px_rgba(0,0,0,0.7)] transition-all hover:-translate-y-0.5 hover:bg-indigo-500 hover:shadow-[0_18px_36px_-14px_rgba(0,0,0,0.75)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2 active:translate-y-0"
+							className="relative mt-6 inline-flex items-center justify-center gap-2 rounded-full bg-indigo-600 px-7 py-4 font-medium text-lg text-paper-100 shadow-[0_14px_30px_-16px_rgba(0,0,0,0.7)] transition-all hover:-translate-y-0.5 hover:bg-indigo-500 hover:shadow-[0_18px_36px_-14px_rgba(0,0,0,0.75)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400 focus-visible:outline-offset-2 active:translate-y-0"
 							href="/capture"
 						>
 							<AddPageIcon />
