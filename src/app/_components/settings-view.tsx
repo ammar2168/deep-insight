@@ -115,15 +115,23 @@ function DeleteAccountSection() {
 	const [expanded, setExpanded] = useState(false);
 	const [confirmText, setConfirmText] = useState("");
 	const [error, setError] = useState<string | null>(null);
+	// Covers the whole delete -> sign out -> redirect sequence, not just the
+	// mutation itself — deleteMutation.isPending alone flips back to false the
+	// moment the delete call resolves, while sign-out and the redirect are
+	// still in flight, which made the button revert to "Delete permanently"
+	// and look like nothing had happened for that gap.
+	const [isFinishing, setIsFinishing] = useState(false);
 	const deleteMutation = api.settings.deleteAccount.useMutation();
 
 	async function handleDelete() {
 		setError(null);
+		setIsFinishing(true);
 		try {
 			await deleteMutation.mutateAsync();
 			await authClient.signOut();
 			router.push("/");
 		} catch (err) {
+			setIsFinishing(false);
 			setError(errorMessage(err, "Couldn't delete your account. Try again?"));
 		}
 	}
@@ -180,7 +188,7 @@ function DeleteAccountSection() {
 			<div className="flex gap-2">
 				<button
 					className="rounded-full px-4 py-2 font-medium text-ink-600 text-xs transition-colors hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
-					disabled={deleteMutation.isPending}
+					disabled={isFinishing}
 					onClick={() => {
 						setExpanded(false);
 						setConfirmText("");
@@ -192,14 +200,12 @@ function DeleteAccountSection() {
 				</button>
 				<button
 					className="inline-flex items-center gap-2 rounded-full bg-indigo-600 px-4 py-2 font-medium text-paper-100 text-xs transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
-					disabled={
-						confirmText !== DELETE_CONFIRM_PHRASE || deleteMutation.isPending
-					}
+					disabled={confirmText !== DELETE_CONFIRM_PHRASE || isFinishing}
 					onClick={handleDelete}
 					type="button"
 				>
-					{deleteMutation.isPending && <SpinnerIcon />}
-					{deleteMutation.isPending ? "Deleting…" : "Delete permanently"}
+					{isFinishing && <SpinnerIcon />}
+					{isFinishing ? "Deleting…" : "Delete permanently"}
 				</button>
 			</div>
 		</div>
