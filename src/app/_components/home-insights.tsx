@@ -111,7 +111,7 @@ export function HomeInsights() {
 						className="flex-1 rounded-full border border-indigo-500/20 bg-paper-200 px-4 py-2.5 text-[15px] text-ink-900 transition-colors placeholder:text-ink-600/60 focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
 						id={askInputId}
 						onChange={(e) => setQuestion(e.target.value)}
-						placeholder="How has my mood been the last two months?"
+						placeholder="How's my mood been lately?"
 						type="text"
 						value={question}
 					/>
