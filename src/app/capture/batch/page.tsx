@@ -34,23 +34,54 @@ function BackIcon() {
 	);
 }
 
+/**
+ * Looks for an unambiguous YYYY-MM-DD (or YYYYMMDD / YYYY_MM_DD) date
+ * anywhere in a filename. Deliberately narrow — a month-name ("sept2") or
+ * locale-dependent (MM/DD vs DD/DD) format is too ambiguous to guess at
+ * silently, so those fall through to the content check instead.
+ */
+function parseFilenameDate(filename: string): string | null {
+	const match = filename.match(/(\d{4})[-_]?(\d{2})[-_]?(\d{2})/);
+	if (!match) return null;
+	const [, year, month, day] = match;
+	// biome-ignore lint/style/noNonNullAssertion: the regex guarantees these three groups
+	const iso = `${year}-${month}-${day!}`;
+	const asDate = new Date(`${iso}T00:00:00Z`);
+	const isReal =
+		asDate.getUTCFullYear() === Number(year) &&
+		asDate.getUTCMonth() === Number(month) - 1 &&
+		asDate.getUTCDate() === Number(day);
+	return isReal ? iso : null;
+}
+
+type PhotoItem = { photo: Photo; text: string; date: string | null };
+
 type GroupResult =
 	| { date: string; status: "saved"; insightCount: number; manualDate: boolean }
 	| { date: string; status: "failed"; reason: string };
 
 type Phase =
 	| { kind: "select" }
-	| { kind: "processing" }
-	| { kind: "need-date"; photo: Photo; preview: string }
+	| { kind: "processing"; stage: "reading" | "saving" }
+	| {
+			kind: "need-date";
+			item: PhotoItem;
+			position: number;
+			total: number;
+			suggestion: string | null;
+	  }
 	| { kind: "summary"; results: GroupResult[]; skipped: string[] };
 
 /**
- * Runs the same extractText -> extractInsights -> save pipeline DayCapture
- * uses, but per photo instead of per pre-grouped day, with no review step in
- * between: OCR alone has to carry the date (each photo's own detected
- * dateline, falling back to "same day as the page before it," falling back to
- * asking) since dates are needed before grouping can even happen — there's no
- * upfront manual grouping step left to lean on here.
+ * Three passes over the same photos, rather than one pass that decides
+ * everything inline:
+ *   1. Read every photo (OCR), trying a date from its filename, then its own
+ *      content — never blocking the pass on one ambiguous photo.
+ *   2. Resolve whatever photos didn't get a date, one at a time, in order.
+ *      No page is ever silently assumed to continue the previous one; if the
+ *      date can't be determined, the user is asked, always.
+ *   3. Now that every photo has a real date, group consecutive same-date
+ *      photos into one entry and save — identical logic to a pre-grouped day.
  */
 export default function BatchCapturePage() {
 	const [photos, setPhotos] = useState<Photo[]>([]);
@@ -91,17 +122,22 @@ export default function BatchCapturePage() {
 		});
 	}
 
-	function waitForManualDate(photo: Photo, preview: string): Promise<string> {
+	function waitForManualDate(
+		item: PhotoItem,
+		position: number,
+		total: number,
+		suggestion: string | null,
+	): Promise<string> {
 		return new Promise((resolve) => {
 			dateResolveRef.current = resolve;
-			setPhase({ kind: "need-date", photo, preview });
+			setPhase({ kind: "need-date", item, position, total, suggestion });
 		});
 	}
 
 	function submitManualDate() {
 		const value = dateInputRef.current?.value;
 		if (!value) return;
-		setPhase({ kind: "processing" });
+		setPhase({ kind: "processing", stage: "reading" });
 		dateResolveRef.current?.(value);
 		dateResolveRef.current = null;
 	}
@@ -120,16 +156,82 @@ export default function BatchCapturePage() {
 	}
 
 	async function runPipeline() {
-		setPhase({ kind: "processing" });
+		setPhase({ kind: "processing", stage: "reading" });
 		setCompleted([]);
-		const results: GroupResult[] = [];
+		const items: PhotoItem[] = [];
 		const skipped: string[] = [];
+
+		// Pass 1: read every photo, no blocking on an undetermined date.
+		for (let i = 0; i < photos.length; i++) {
+			// biome-ignore lint/style/noNonNullAssertion: i is always a valid index into photos
+			const photo = photos[i]!;
+			setProgress({ current: i + 1, total: photos.length });
+
+			let text: string;
+			let mentionedDates: { rawText: string; resolvedDate: string }[];
+			let crisis: boolean;
+			try {
+				const base64 = await fileToCompressedDataUrl(photo.file);
+				const ocr = await extractTextMutation.mutateAsync({
+					photos: [{ base64, mediaType: "image/jpeg" }],
+				});
+				text = ocr.text;
+				mentionedDates = ocr.mentionedDates;
+				crisis = ocr.crisis;
+			} catch {
+				skipped.push(photo.name);
+				continue;
+			}
+
+			if (crisis) {
+				await waitForCrisisContinue();
+			}
+
+			const date =
+				parseFilenameDate(photo.name) ??
+				mentionedDates[0]?.resolvedDate ??
+				null;
+			items.push({ photo, text, date });
+		}
+
+		// Pass 2: resolve whatever couldn't be determined, one at a time. The
+		// nearest earlier resolved date is offered as a pre-filled suggestion
+		// (multi-page entries often don't repeat the date on every page) but
+		// it's never applied without the user seeing and confirming it.
+		const undatedIndices = items
+			.map((_item, index) => index)
+			.filter((index) => items[index]?.date === null);
+		const manualIndices = new Set<number>();
+
+		for (let n = 0; n < undatedIndices.length; n++) {
+			// biome-ignore lint/style/noNonNullAssertion: n is always a valid index into undatedIndices
+			const index = undatedIndices[n]!;
+			// biome-ignore lint/style/noNonNullAssertion: index came from items itself
+			const item = items[index]!;
+			const suggestion =
+				items
+					.slice(0, index)
+					.reverse()
+					.find((it) => it.date !== null)?.date ?? null;
+			const chosen = await waitForManualDate(
+				item,
+				n + 1,
+				undatedIndices.length,
+				suggestion,
+			);
+			item.date = chosen;
+			manualIndices.add(index);
+		}
+
+		// Pass 3: every item now has a real date — group consecutive same-date
+		// items into one entry and save.
+		setPhase({ kind: "processing", stage: "saving" });
+		const results: GroupResult[] = [];
 		let currentGroup: {
 			date: string;
 			texts: string[];
 			manualDate: boolean;
 		} | null = null;
-		let lastResolvedDate: string | null = null;
 
 		async function finalizeGroup() {
 			if (!currentGroup) return;
@@ -159,53 +261,24 @@ export default function BatchCapturePage() {
 			currentGroup = null;
 		}
 
-		for (let i = 0; i < photos.length; i++) {
-			// biome-ignore lint/style/noNonNullAssertion: i is always a valid index into photos
-			const photo = photos[i]!;
-			setProgress({ current: i + 1, total: photos.length });
-
-			let text: string;
-			let mentionedDates: { rawText: string; resolvedDate: string }[];
-			let crisis: boolean;
-			try {
-				const base64 = await fileToCompressedDataUrl(photo.file);
-				const ocr = await extractTextMutation.mutateAsync({
-					photos: [{ base64, mediaType: "image/jpeg" }],
-				});
-				text = ocr.text;
-				mentionedDates = ocr.mentionedDates;
-				crisis = ocr.crisis;
-			} catch {
-				skipped.push(photo.name);
-				continue;
-			}
-
-			if (crisis) {
-				await waitForCrisisContinue();
-			}
-
-			let resolvedDate: string;
-			let manualDate = false;
-			const detected = mentionedDates[0]?.resolvedDate;
-			if (detected) {
-				resolvedDate = detected;
-			} else if (lastResolvedDate) {
-				resolvedDate = lastResolvedDate;
-			} else {
-				resolvedDate = await waitForManualDate(photo, text);
-				manualDate = true;
-			}
-			lastResolvedDate = resolvedDate;
-
-			if (currentGroup && currentGroup.date === resolvedDate) {
-				currentGroup.texts.push(text);
-				if (manualDate) currentGroup.manualDate = true;
+		for (let i = 0; i < items.length; i++) {
+			// biome-ignore lint/style/noNonNullAssertion: i is always a valid index into items
+			const item = items[i]!;
+			// biome-ignore lint/style/noNonNullAssertion: every item's date is resolved by pass 2
+			const date = item.date!;
+			if (currentGroup && currentGroup.date === date) {
+				currentGroup.texts.push(item.text);
 			} else {
 				await finalizeGroup();
-				currentGroup = { date: resolvedDate, texts: [text], manualDate };
+				currentGroup = {
+					date,
+					texts: [item.text],
+					manualDate: manualIndices.has(i),
+				};
 			}
 		}
 		await finalizeGroup();
+
 		setPhase({ kind: "summary", results, skipped });
 	}
 
@@ -238,9 +311,9 @@ export default function BatchCapturePage() {
 								Add several days at once
 							</h1>
 							<p className="text-indigo-400 text-sm">
-								Add every page, in the order they were written. If a page has
-								its date written on it, we'll sort it out automatically —
-								otherwise we'll ask.{" "}
+								Add every page, in the order they were written. We'll look for a
+								date on each page — if we can't find one, we'll ask once
+								everything else is sorted.{" "}
 								<Link
 									className="underline decoration-indigo-500/40 underline-offset-4 hover:text-paper-100"
 									href="/capture"
@@ -282,12 +355,20 @@ export default function BatchCapturePage() {
 						<div className="flex items-center gap-3 text-ink-900">
 							<SpinnerIcon />
 							<p className="font-medium text-sm">
-								Processing page{" "}
-								<span className="font-mono tabular-nums">
-									{progress.current}
-								</span>{" "}
-								of{" "}
-								<span className="font-mono tabular-nums">{progress.total}</span>
+								{phase.stage === "reading" ? (
+									<>
+										Reading page{" "}
+										<span className="font-mono tabular-nums">
+											{progress.current}
+										</span>{" "}
+										of{" "}
+										<span className="font-mono tabular-nums">
+											{progress.total}
+										</span>
+									</>
+								) : (
+									"Saving your entries…"
+								)}
 							</p>
 						</div>
 						<p className="mt-2 text-ink-600 text-sm">
@@ -319,24 +400,31 @@ export default function BatchCapturePage() {
 				)}
 
 				{phase.kind === "need-date" && (
-					<section className="rounded-sm bg-paper-100 p-6 text-ink-900 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.6)] sm:p-8">
-						<h2 className="font-semibold text-ink-900 text-lg">
+					<section
+						className="rounded-sm bg-paper-100 p-6 text-ink-900 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.6)] sm:p-8"
+						key={phase.item.photo.id}
+					>
+						<p className="font-mono text-ink-600 text-xs uppercase tracking-[0.2em]">
+							{phase.total === 1
+								? "One page needs a date"
+								: `Page ${phase.position} of ${phase.total} without a date`}
+						</p>
+						<h2 className="mt-2 font-semibold text-ink-900 text-lg">
 							What date is this page?
 						</h2>
 						<p className="mt-1 text-ink-600 text-sm">
-							We couldn't find a date on it, and there's no earlier page to
-							assume it continues from.
+							We couldn't find a date on it, in its content or its filename.
 						</p>
 
 						<div className="mt-4 flex flex-col gap-4 sm:flex-row">
 							{/* biome-ignore lint/performance/noImgElement: object URL from local file input */}
 							<img
-								alt={phase.photo.name}
+								alt={phase.item.photo.name}
 								className="h-48 w-40 shrink-0 rounded-sm border border-indigo-500/30 object-cover"
-								src={phase.photo.url}
+								src={phase.item.photo.url}
 							/>
 							<div className="max-h-48 overflow-y-auto rounded-sm bg-paper-200 p-3 text-ink-600 text-sm">
-								{phase.preview || "No text could be read from this page."}
+								{phase.item.text || "No text could be read from this page."}
 							</div>
 						</div>
 
@@ -349,11 +437,18 @@ export default function BatchCapturePage() {
 							</label>
 							<input
 								className="w-fit rounded-sm border border-indigo-500/20 bg-paper-200 px-3 py-2 text-[15px] text-ink-900 transition-colors focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+								defaultValue={phase.suggestion ?? undefined}
 								id="manual-date"
 								max={getLocalDateString()}
 								ref={dateInputRef}
 								type="date"
 							/>
+							{phase.suggestion && (
+								<p className="text-ink-600 text-xs">
+									Pre-filled with the date from the page before it — change it
+									if that's not right.
+								</p>
+							)}
 						</div>
 
 						<div className="mt-5 flex justify-end">
