@@ -409,10 +409,9 @@ export default function BatchCapturePage() {
 								</p>
 								<p className="text-ink-600 text-sm">
 									Or name the file with the date —{" "}
-									<span className="font-mono text-ink-900">2024-09-02.jpg</span>{" "}
-									or{" "}
-									<span className="font-mono text-ink-900">2 Sep 2024.jpg</span>{" "}
-									both work — the same date on every page from that day.
+									<span className="font-mono text-ink-900">2024-09-02</span> or
+									"2 Sep 2024" both work — the same date on every page from that
+									day.
 								</p>
 							</div>
 
