@@ -324,6 +324,20 @@ export default function BatchCapturePage() {
 						</header>
 
 						<section className="rounded-sm bg-paper-100 p-6 text-ink-900 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.6)] sm:p-8">
+							<div className="mb-6 flex flex-col gap-1.5 rounded-sm bg-paper-200 p-4">
+								<p className="font-mono text-[11px] text-ink-600 uppercase tracking-wide">
+									For the smoothest results
+								</p>
+								<p className="text-ink-600 text-sm">
+									Write the date somewhere on each page you photograph.
+								</p>
+								<p className="text-ink-600 text-sm">
+									Or name the file with a date, like{" "}
+									<span className="font-mono text-ink-900">2024-09-02.jpg</span>{" "}
+									— the same date on every page from that day.
+								</p>
+							</div>
+
 							<PhotoPicker
 								hint="Every page, in order."
 								label="Add pages"
