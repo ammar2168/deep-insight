@@ -36,9 +36,10 @@ function BackIcon() {
 
 /**
  * Looks for an unambiguous YYYY-MM-DD (or YYYYMMDD / YYYY_MM_DD) date
- * anywhere in a filename. Deliberately narrow — a month-name ("sept2") or
- * locale-dependent (MM/DD vs DD/DD) format is too ambiguous to guess at
- * silently, so those fall through to the content check instead.
+ * anywhere in a filename. A locale-dependent numeric order (03-04-2024) is
+ * too ambiguous to guess at silently, so that still falls through — but a
+ * month-name filename is handled by resolveFilenameDate below, which tries
+ * this first and falls back to the same casual parser quick entry uses.
  */
 function parseFilenameDate(filename: string): string | null {
 	const match = filename.match(/(\d{4})[-_]?(\d{2})[-_]?(\d{2})/);
@@ -115,6 +116,21 @@ function parseCasualDate(
 		asDate.getUTCMonth() === month &&
 		asDate.getUTCDate() === day;
 	return isReal ? iso : null;
+}
+
+/**
+ * The one function the pipeline actually calls for a filename: strict ISO
+ * first, then the same casual parser quick entry uses, against the filename
+ * with its extension stripped and separators normalized to spaces — so
+ * "2024-09-02.jpg" and "2 Sep 2024.jpg" both resolve, matching the two
+ * examples shown to the user, but "vacation_photo_final.jpg" correctly finds
+ * nothing rather than guessing at a fragment.
+ */
+function resolveFilenameDate(filename: string): string | null {
+	const strict = parseFilenameDate(filename);
+	if (strict) return strict;
+	const withoutExtension = filename.replace(/\.[^.]+$/, "");
+	return parseCasualDate(withoutExtension.replace(/[-_]+/g, " "));
 }
 
 type PhotoItem = { photo: Photo; text: string; date: string | null };
@@ -248,7 +264,7 @@ export default function BatchCapturePage() {
 			}
 
 			const date =
-				parseFilenameDate(photo.name) ??
+				resolveFilenameDate(photo.name) ??
 				mentionedDates[0]?.resolvedDate ??
 				null;
 			items.push({ photo, text, date });
@@ -392,9 +408,11 @@ export default function BatchCapturePage() {
 									Write the date somewhere on each page you photograph.
 								</p>
 								<p className="text-ink-600 text-sm">
-									Or name the file with a date, like{" "}
+									Or name the file with the date —{" "}
 									<span className="font-mono text-ink-900">2024-09-02.jpg</span>{" "}
-									— the same date on every page from that day.
+									or{" "}
+									<span className="font-mono text-ink-900">2 Sep 2024.jpg</span>{" "}
+									both work — the same date on every page from that day.
 								</p>
 							</div>
 
