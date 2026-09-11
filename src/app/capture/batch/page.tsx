@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { type KeyboardEvent, useId, useRef, useState } from "react";
 
 import { CrisisCheckInModal } from "@/app/_components/crisis-check-in-modal";
 import {
@@ -54,6 +54,69 @@ function parseFilenameDate(filename: string): string | null {
 	return isReal ? iso : null;
 }
 
+const MONTH_NAMES: Record<string, number> = {
+	jan: 0,
+	feb: 1,
+	mar: 2,
+	apr: 3,
+	may: 4,
+	jun: 5,
+	jul: 6,
+	aug: 7,
+	sep: 8,
+	oct: 9,
+	nov: 10,
+	dec: 11,
+};
+
+/**
+ * Turns a casually-typed date ("Sep 3", "3 Sept", "September 3rd, 2024") into
+ * YYYY-MM-DD, for the one field where correctness matters most — a date the
+ * app couldn't determine on its own. Never guesses a year silently beyond the
+ * same rule the server already applies to dates read off the page itself: no
+ * year given means the most recent occurrence, not the current year outright.
+ * Returns null on anything it isn't confident about, on purpose — the caller
+ * always shows the result back before it's ever saved, it's never applied
+ * without that.
+ */
+function parseCasualDate(
+	raw: string,
+	referenceDate: Date = new Date(),
+): string | null {
+	const trimmed = raw.trim();
+	const monthFirst = trimmed.match(
+		/^([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?$/,
+	);
+	const dayFirst = trimmed.match(
+		/^(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?(?:,?\s+(\d{4}))?$/,
+	);
+	const match = monthFirst ?? dayFirst;
+	if (!match) return null;
+
+	const monthStr = monthFirst ? monthFirst[1] : dayFirst?.[2];
+	const dayStr = monthFirst ? monthFirst[2] : dayFirst?.[1];
+	const yearStr = monthFirst ? monthFirst[3] : dayFirst?.[3];
+	if (!monthStr || !dayStr) return null;
+
+	const month = MONTH_NAMES[monthStr.slice(0, 3).toLowerCase()];
+	if (month === undefined) return null;
+	const day = Number(dayStr);
+	if (day < 1 || day > 31) return null;
+
+	let year = yearStr ? Number(yearStr) : referenceDate.getUTCFullYear();
+	if (!yearStr && Date.UTC(year, month, day) > referenceDate.getTime()) {
+		year -= 1;
+	}
+
+	const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+	const asDate = new Date(`${iso}T00:00:00Z`);
+	const isReal =
+		asDate.getUTCFullYear() === year &&
+		asDate.getUTCMonth() === month &&
+		asDate.getUTCDate() === day;
+	return isReal ? iso : null;
+}
+
 type PhotoItem = { photo: Photo; text: string; date: string | null };
 
 type GroupResult =
@@ -91,7 +154,6 @@ export default function BatchCapturePage() {
 	const [pickError, setPickError] = useState<string | null>(null);
 	const [showCrisisModal, setShowCrisisModal] = useState(false);
 
-	const dateInputRef = useRef<HTMLInputElement>(null);
 	const dateResolveRef = useRef<((date: string) => void) | null>(null);
 	const crisisResolveRef = useRef<(() => void) | null>(null);
 
@@ -134,11 +196,9 @@ export default function BatchCapturePage() {
 		});
 	}
 
-	function submitManualDate() {
-		const value = dateInputRef.current?.value;
-		if (!value) return;
+	function submitManualDate(date: string) {
 		setPhase({ kind: "processing", stage: "reading" });
-		dateResolveRef.current?.(value);
+		dateResolveRef.current?.(date);
 		dateResolveRef.current = null;
 	}
 
@@ -414,67 +474,14 @@ export default function BatchCapturePage() {
 				)}
 
 				{phase.kind === "need-date" && (
-					<section
-						className="rounded-sm bg-paper-100 p-6 text-ink-900 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.6)] sm:p-8"
+					<NeedDateCard
+						item={phase.item}
 						key={phase.item.photo.id}
-					>
-						<p className="font-mono text-ink-600 text-xs uppercase tracking-[0.2em]">
-							{phase.total === 1
-								? "One page needs a date"
-								: `Page ${phase.position} of ${phase.total} without a date`}
-						</p>
-						<h2 className="mt-2 font-semibold text-ink-900 text-lg">
-							What date is this page?
-						</h2>
-						<p className="mt-1 text-ink-600 text-sm">
-							We couldn't find a date on it, in its content or its filename.
-						</p>
-
-						<div className="mt-4 flex flex-col gap-4 sm:flex-row">
-							{/* biome-ignore lint/performance/noImgElement: object URL from local file input */}
-							<img
-								alt={phase.item.photo.name}
-								className="h-48 w-40 shrink-0 rounded-sm border border-indigo-500/30 object-cover"
-								src={phase.item.photo.url}
-							/>
-							<div className="max-h-48 overflow-y-auto rounded-sm bg-paper-200 p-3 text-ink-600 text-sm">
-								{phase.item.text || "No text could be read from this page."}
-							</div>
-						</div>
-
-						<div className="mt-4 flex flex-col gap-1.5">
-							<label
-								className="font-mono text-[11px] text-ink-600 uppercase tracking-wide"
-								htmlFor="manual-date"
-							>
-								Date
-							</label>
-							<input
-								className="w-fit rounded-sm border border-indigo-500/20 bg-paper-200 px-3 py-2 text-[15px] text-ink-900 transition-colors focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
-								defaultValue={phase.suggestion ?? undefined}
-								id="manual-date"
-								max={getLocalDateString()}
-								ref={dateInputRef}
-								type="date"
-							/>
-							{phase.suggestion && (
-								<p className="text-ink-600 text-xs">
-									Pre-filled with the date from the page before it — change it
-									if that's not right.
-								</p>
-							)}
-						</div>
-
-						<div className="mt-5 flex justify-end">
-							<button
-								className="inline-flex items-center gap-2 rounded-full bg-indigo-600 px-6 py-3 font-medium text-paper-100 text-sm transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400 focus-visible:outline-offset-2"
-								onClick={submitManualDate}
-								type="button"
-							>
-								Continue
-							</button>
-						</div>
-					</section>
+						onSubmit={submitManualDate}
+						position={phase.position}
+						suggestion={phase.suggestion}
+						total={phase.total}
+					/>
 				)}
 
 				{phase.kind === "summary" && (
@@ -486,6 +493,141 @@ export default function BatchCapturePage() {
 				<CrisisCheckInModal onContinue={handleCrisisContinue} />
 			)}
 		</main>
+	);
+}
+
+function NeedDateCard({
+	item,
+	position,
+	total,
+	suggestion,
+	onSubmit,
+}: {
+	item: PhotoItem;
+	position: number;
+	total: number;
+	suggestion: string | null;
+	onSubmit: (date: string) => void;
+}) {
+	const [date, setDate] = useState(suggestion ?? "");
+	const [quickEntry, setQuickEntry] = useState("");
+	const [quickEntryInvalid, setQuickEntryInvalid] = useState(false);
+	const quickEntryId = useId();
+	const dateInputId = useId();
+
+	function handleQuickEntryChange(value: string) {
+		setQuickEntry(value);
+		setQuickEntryInvalid(false);
+		const parsed = parseCasualDate(value);
+		if (parsed) setDate(parsed);
+	}
+
+	function handleQuickEntryKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+		if (e.key !== "Enter") return;
+		e.preventDefault();
+		// Empty quick entry + Enter means "accept whatever the date field
+		// already shows" (the suggestion, or a prior successful parse) — never
+		// falls back to that stale value when quick entry actually has text
+		// that failed to parse; that's exactly the silent-wrong-guess this
+		// whole flow exists to avoid.
+		if (!quickEntry.trim()) {
+			if (date) onSubmit(date);
+			return;
+		}
+		const parsed = parseCasualDate(quickEntry);
+		if (parsed) {
+			onSubmit(parsed);
+		} else {
+			setQuickEntryInvalid(true);
+		}
+	}
+
+	return (
+		<section className="rounded-sm bg-paper-100 p-6 text-ink-900 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.6)] sm:p-8">
+			<p className="font-mono text-ink-600 text-xs uppercase tracking-[0.2em]">
+				{total === 1
+					? "One page needs a date"
+					: `Page ${position} of ${total} without a date`}
+			</p>
+			<h2 className="mt-2 font-semibold text-ink-900 text-lg">
+				What date is this page?
+			</h2>
+			<p className="mt-1 text-ink-600 text-sm">
+				We couldn't find a date on it, in its content or its filename.
+			</p>
+
+			<div className="mt-4 flex flex-col gap-4 sm:flex-row">
+				{/* biome-ignore lint/performance/noImgElement: object URL from local file input */}
+				<img
+					alt={item.photo.name}
+					className="h-48 w-40 shrink-0 rounded-sm border border-indigo-500/30 object-cover"
+					src={item.photo.url}
+				/>
+				<div className="max-h-48 overflow-y-auto rounded-sm bg-paper-200 p-3 text-ink-600 text-sm">
+					{item.text || "No text could be read from this page."}
+				</div>
+			</div>
+
+			<div className="mt-4 flex flex-col gap-3">
+				<div className="flex flex-col gap-1.5">
+					<label
+						className="font-mono text-[11px] text-ink-600 uppercase tracking-wide"
+						htmlFor={quickEntryId}
+					>
+						Quick entry
+					</label>
+					<input
+						className="w-full max-w-xs rounded-sm border border-indigo-500/20 bg-paper-200 px-3 py-2 text-[15px] text-ink-900 transition-colors focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+						id={quickEntryId}
+						onChange={(e) => handleQuickEntryChange(e.target.value)}
+						onKeyDown={handleQuickEntryKeyDown}
+						placeholder='e.g. "Sep 3" or "3 Sept 2024"'
+						type="text"
+						value={quickEntry}
+					/>
+					{quickEntryInvalid && (
+						<p className="text-ink-600 text-xs">
+							Couldn't quite parse that — try the date field below, or a format
+							like "Sep 3".
+						</p>
+					)}
+				</div>
+
+				<div className="flex flex-col gap-1.5">
+					<label
+						className="font-mono text-[11px] text-ink-600 uppercase tracking-wide"
+						htmlFor={dateInputId}
+					>
+						Date
+					</label>
+					<input
+						className="w-fit rounded-sm border border-indigo-500/20 bg-paper-200 px-3 py-2 text-[15px] text-ink-900 transition-colors focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+						id={dateInputId}
+						max={getLocalDateString()}
+						onChange={(e) => setDate(e.target.value)}
+						type="date"
+						value={date}
+					/>
+					{suggestion && date === suggestion && (
+						<p className="text-ink-600 text-xs">
+							Pre-filled with the date from the page before it — change it if
+							that's not right.
+						</p>
+					)}
+				</div>
+			</div>
+
+			<div className="mt-5 flex justify-end">
+				<button
+					className="inline-flex items-center gap-2 rounded-full bg-indigo-600 px-6 py-3 font-medium text-paper-100 text-sm transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+					disabled={!date}
+					onClick={() => onSubmit(date)}
+					type="button"
+				>
+					Continue
+				</button>
+			</div>
+		</section>
 	);
 }
 

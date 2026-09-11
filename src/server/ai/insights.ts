@@ -273,13 +273,14 @@ ${text}
 	}
 
 	const input = toolUse.input as { insights?: unknown };
-	if (!Array.isArray(input.insights)) {
-		// Not a hypothetical: a long real entry can push a truncated tool call's
-		// JSON into a shape that isn't a clean array, and casting alone won't catch
-		// that at runtime — surface it plainly instead of crashing downstream with
-		// an opaque "X.map is not a function" wherever the caller expects a list.
-		// Logs shape only, never the model's actual output — that output is derived
-		// from the user's own journal text.
+	const insights = normalizeInsightsShape(input.insights);
+	if (!insights) {
+		// A long real entry can also push a truncated tool call's JSON into a
+		// shape that isn't a clean array, and casting alone won't catch that at
+		// runtime — surface it plainly instead of crashing downstream with an
+		// opaque "X.map is not a function" wherever the caller expects a list.
+		// Logs shape only, never the model's actual output — that output is
+		// derived from the user's own journal text.
 		console.error(
 			`[extractInsights] malformed tool response, stop_reason=${response.stop_reason}, ` +
 				`typeof insights=${typeof input.insights}, keys=${Object.keys(toolUse.input as object).join(",")}`,
@@ -289,7 +290,50 @@ ${text}
 			message: "Couldn't read insights from the model's response",
 		});
 	}
-	return input.insights as ExtractedInsight[];
+	return insights;
+}
+
+/**
+ * Validates (and where possible, recovers) the raw `insights` field from the
+ * model's tool-use response. Exported standalone so the exact shape this
+ * bug hit — a JSON-encoded string instead of a real array, inside an
+ * otherwise well-formed tool call — is directly unit-testable without
+ * mocking the Claude API itself. Returns null on anything not confidently a
+ * real list of insights; never guesses at partial or malformed data.
+ */
+export function normalizeInsightsShape(
+	raw: unknown,
+): ExtractedInsight[] | null {
+	let insights = raw;
+
+	// Observed, not hypothetical: the model occasionally serializes the array
+	// as a JSON-encoded string within an otherwise well-formed tool call
+	// (stop_reason is a clean "tool_use", not a truncation) — recover that
+	// specific, common shape rather than failing a batch over it, but still
+	// fully validate the result below before trusting it either way.
+	if (typeof insights === "string") {
+		try {
+			insights = JSON.parse(insights);
+		} catch {
+			// Falls through to the shape check, which rejects it either way.
+		}
+	}
+
+	if (!Array.isArray(insights) || !insights.every(isWellFormedInsight)) {
+		return null;
+	}
+	return insights;
+}
+
+function isWellFormedInsight(item: unknown): item is ExtractedInsight {
+	if (typeof item !== "object" || item === null) return false;
+	const { category, label, value } = item as Record<string, unknown>;
+	return (
+		typeof category === "string" &&
+		(INSIGHT_CATEGORIES as readonly string[]).includes(category) &&
+		typeof label === "string" &&
+		typeof value === "string"
+	);
 }
 
 const ANALYZE_TREND_TOOL_DESCRIPTION =
