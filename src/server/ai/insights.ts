@@ -230,20 +230,24 @@ const RECORD_INSIGHTS_TOOL = {
 	},
 };
 
+const EXTRACT_INSIGHTS_ATTEMPTS = 2;
+
 export async function extractInsightsFromText(
 	text: string,
 ): Promise<ExtractedInsight[]> {
 	const client = getClient();
 
-	const response = await client.messages.create({
-		model: MODEL,
-		max_tokens: 2048,
-		tools: [RECORD_INSIGHTS_TOOL],
-		tool_choice: { type: "tool", name: "record_insights" },
-		messages: [
-			{
-				role: "user",
-				content: `You are extracting concise personal insights from a journal entry, for an app that surfaces them back to the writer.
+	let lastFailure = "";
+	for (let attempt = 1; attempt <= EXTRACT_INSIGHTS_ATTEMPTS; attempt++) {
+		const response = await client.messages.create({
+			model: MODEL,
+			max_tokens: 2048,
+			tools: [RECORD_INSIGHTS_TOOL],
+			tool_choice: { type: "tool", name: "record_insights" },
+			messages: [
+				{
+					role: "user",
+					content: `You are extracting concise personal insights from a journal entry, for an app that surfaces them back to the writer.
 
 Read the entry below and extract 3-6 short, discrete insights about the writer's mood, sleep, habits, relationships, or goals/projects they mention — only things actually supported by the text. Each insight needs a category (${INSIGHT_CATEGORIES.join(", ")}), a short label, and a one-sentence value written in second person, speaking directly to the writer as "you" — this reads back to them personally, not as a clinical report about "the writer". Use "goal" for anything tied to a specific named project or objective, and give it a label that names it (e.g. "Goal: Marlowe project"), not just "Goal". Use "other" only when nothing else fits. Do not invent anything the text doesn't support. If the entry is too short or vague to say anything meaningful, return an empty list rather than making something up.
 
@@ -251,46 +255,50 @@ Journal entry:
 """
 ${text}
 """`,
-			},
-		],
-	});
-
-	console.log(
-		`[extractInsights] stop_reason=${response.stop_reason} output_tokens=${response.usage.output_tokens}`,
-	);
-	if (response.stop_reason === "max_tokens") {
-		console.warn(
-			"[extractInsights] response hit max_tokens — output was likely truncated",
-		);
-	}
-
-	const toolUse = response.content.find((block) => block.type === "tool_use");
-	if (toolUse?.type !== "tool_use") {
-		throw new TRPCError({
-			code: "INTERNAL_SERVER_ERROR",
-			message: "Couldn't read a structured response from the model",
+				},
+			],
 		});
-	}
 
-	const input = toolUse.input as { insights?: unknown };
-	const insights = normalizeInsightsShape(input.insights);
-	if (!insights) {
+		console.log(
+			`[extractInsights] attempt=${attempt} stop_reason=${response.stop_reason} output_tokens=${response.usage.output_tokens}`,
+		);
+		if (response.stop_reason === "max_tokens") {
+			console.warn(
+				"[extractInsights] response hit max_tokens — output was likely truncated",
+			);
+		}
+
+		const toolUse = response.content.find((block) => block.type === "tool_use");
+		if (toolUse?.type !== "tool_use") {
+			lastFailure = "no structured tool_use block in the response";
+			continue;
+		}
+
+		const input = toolUse.input as { insights?: unknown };
+		const insights = normalizeInsightsShape(input.insights);
+		if (insights) return insights;
+
 		// A long real entry can also push a truncated tool call's JSON into a
 		// shape that isn't a clean array, and casting alone won't catch that at
-		// runtime — surface it plainly instead of crashing downstream with an
-		// opaque "X.map is not a function" wherever the caller expects a list.
+		// runtime. This has also been observed as plain non-determinism — the
+		// same input, retried, comes back well-formed — so one retry before
+		// surfacing plainly, rather than crashing downstream with an opaque
+		// "X.map is not a function" wherever the caller expects a list.
 		// Logs shape only, never the model's actual output — that output is
 		// derived from the user's own journal text.
+		lastFailure = `typeof insights=${typeof input.insights}, keys=${Object.keys(toolUse.input as object).join(",")}`;
 		console.error(
-			`[extractInsights] malformed tool response, stop_reason=${response.stop_reason}, ` +
-				`typeof insights=${typeof input.insights}, keys=${Object.keys(toolUse.input as object).join(",")}`,
+			`[extractInsights] attempt=${attempt} malformed tool response, stop_reason=${response.stop_reason}, ${lastFailure}`,
 		);
-		throw new TRPCError({
-			code: "INTERNAL_SERVER_ERROR",
-			message: "Couldn't read insights from the model's response",
-		});
 	}
-	return insights;
+
+	console.error(
+		`[extractInsights] all ${EXTRACT_INSIGHTS_ATTEMPTS} attempts failed, last: ${lastFailure}`,
+	);
+	throw new TRPCError({
+		code: "INTERNAL_SERVER_ERROR",
+		message: "Couldn't read insights from the model's response",
+	});
 }
 
 /**

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { type KeyboardEvent, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import { CrisisCheckInModal } from "@/app/_components/crisis-check-in-modal";
 import {
@@ -528,37 +528,7 @@ function NeedDateCard({
 	onSubmit: (date: string) => void;
 }) {
 	const [date, setDate] = useState(suggestion ?? "");
-	const [quickEntry, setQuickEntry] = useState("");
-	const [quickEntryInvalid, setQuickEntryInvalid] = useState(false);
-	const quickEntryId = useId();
 	const dateInputId = useId();
-
-	function handleQuickEntryChange(value: string) {
-		setQuickEntry(value);
-		setQuickEntryInvalid(false);
-		const parsed = parseCasualDate(value);
-		if (parsed) setDate(parsed);
-	}
-
-	function handleQuickEntryKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-		if (e.key !== "Enter") return;
-		e.preventDefault();
-		// Empty quick entry + Enter means "accept whatever the date field
-		// already shows" (the suggestion, or a prior successful parse) — never
-		// falls back to that stale value when quick entry actually has text
-		// that failed to parse; that's exactly the silent-wrong-guess this
-		// whole flow exists to avoid.
-		if (!quickEntry.trim()) {
-			if (date) onSubmit(date);
-			return;
-		}
-		const parsed = parseCasualDate(quickEntry);
-		if (parsed) {
-			onSubmit(parsed);
-		} else {
-			setQuickEntryInvalid(true);
-		}
-	}
 
 	return (
 		<section className="rounded-sm bg-paper-100 p-6 text-ink-900 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.6)] sm:p-8">
@@ -586,53 +556,27 @@ function NeedDateCard({
 				</div>
 			</div>
 
-			<div className="mt-4 flex flex-col gap-3">
-				<div className="flex flex-col gap-1.5">
-					<label
-						className="font-mono text-[11px] text-ink-600 uppercase tracking-wide"
-						htmlFor={quickEntryId}
-					>
-						Quick entry
-					</label>
-					<input
-						className="w-full max-w-xs rounded-sm border border-indigo-500/20 bg-paper-200 px-3 py-2 text-[15px] text-ink-900 transition-colors focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
-						id={quickEntryId}
-						onChange={(e) => handleQuickEntryChange(e.target.value)}
-						onKeyDown={handleQuickEntryKeyDown}
-						placeholder='e.g. "Sep 3" or "3 Sept 2024"'
-						type="text"
-						value={quickEntry}
-					/>
-					{quickEntryInvalid && (
-						<p className="text-ink-600 text-xs">
-							Couldn't quite parse that — try the date field below, or a format
-							like "Sep 3".
-						</p>
-					)}
-				</div>
-
-				<div className="flex flex-col gap-1.5">
-					<label
-						className="font-mono text-[11px] text-ink-600 uppercase tracking-wide"
-						htmlFor={dateInputId}
-					>
-						Date
-					</label>
-					<input
-						className="w-fit rounded-sm border border-indigo-500/20 bg-paper-200 px-3 py-2 text-[15px] text-ink-900 transition-colors focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
-						id={dateInputId}
-						max={getLocalDateString()}
-						onChange={(e) => setDate(e.target.value)}
-						type="date"
-						value={date}
-					/>
-					{suggestion && date === suggestion && (
-						<p className="text-ink-600 text-xs">
-							Pre-filled with the date from the page before it — change it if
-							that's not right.
-						</p>
-					)}
-				</div>
+			<div className="mt-4 flex flex-col gap-1.5">
+				<label
+					className="font-mono text-[11px] text-ink-600 uppercase tracking-wide"
+					htmlFor={dateInputId}
+				>
+					Date
+				</label>
+				<input
+					className="w-fit rounded-sm border border-indigo-500/20 bg-paper-200 px-3 py-2 text-[15px] text-ink-900 transition-colors focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+					id={dateInputId}
+					max={getLocalDateString()}
+					onChange={(e) => setDate(e.target.value)}
+					type="date"
+					value={date}
+				/>
+				{suggestion && date === suggestion && (
+					<p className="text-ink-600 text-xs">
+						Pre-filled with the date from the page before it — change it if
+						that's not right.
+					</p>
+				)}
 			</div>
 
 			<div className="mt-5 flex justify-end">
