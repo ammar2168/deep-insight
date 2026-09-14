@@ -4,13 +4,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	BOOSTED_DAILY_CHAT_LIMIT,
 	FREE_DAILY_CHAT_LIMIT,
+	hasAccessGranted,
 	isTrialExpired,
 	redeemAccessCode,
 	TRIAL_LENGTH_DAYS,
 	tryConsumeChatQuestion,
 } from "@/server/access";
 import { db } from "@/server/db";
-import { accessCodes, user } from "@/server/db/schema";
+import { accessCodes, user, userAccess } from "@/server/db/schema";
 
 function daysAgo(n: number): Date {
 	const d = new Date();
@@ -121,5 +122,52 @@ describe("access codes are single-use, against a real database", () => {
 		// failing must not leave any partial effect behind.
 		const resultB = await tryConsumeChatQuestion(userB);
 		expect(resultB.limit).toBe(FREE_DAILY_CHAT_LIMIT);
+	});
+});
+
+describe("the beta access gate, against a real database", () => {
+	const invited = `access-gate-invited-${randomUUID()}`;
+	const uninvited = `access-gate-uninvited-${randomUUID()}`;
+	const code = `test-code-gate-${randomUUID()}`;
+
+	beforeAll(async () => {
+		await db.insert(user).values([
+			{ id: invited, name: "Invited", email: `${invited}@test.local` },
+			{ id: uninvited, name: "Uninvited", email: `${uninvited}@test.local` },
+		]);
+		await db.insert(accessCodes).values({ code });
+	});
+
+	afterAll(async () => {
+		await db.delete(user).where(eq(user.id, invited));
+		await db.delete(user).where(eq(user.id, uninvited));
+	});
+
+	it("signing up alone grants nothing, and a spent code grants nothing to anyone else", async () => {
+		// Creating an account is not being let in. Both of these users exist and
+		// can authenticate; neither can do anything yet.
+		expect(await hasAccessGranted(invited)).toBe(false);
+		expect(await hasAccessGranted(uninvited)).toBe(false);
+
+		expect(await redeemAccessCode(invited, code)).toBe(true);
+		expect(await hasAccessGranted(invited)).toBe(true);
+
+		// The scenario the gate exists for: the invited user forwards their code
+		// to someone else, who signed up on their own. Redemption fails, and —
+		// the part that actually matters — no access is granted as a side effect.
+		expect(await redeemAccessCode(uninvited, code)).toBe(false);
+		expect(await hasAccessGranted(uninvited)).toBe(false);
+	});
+
+	it("a code nobody ever minted grants nothing", async () => {
+		expect(await redeemAccessCode(uninvited, "not-a-real-code")).toBe(false);
+		expect(await hasAccessGranted(uninvited)).toBe(false);
+	});
+
+	it("records which code let someone in", async () => {
+		const row = await db.query.userAccess.findFirst({
+			where: eq(userAccess.userId, invited),
+		});
+		expect(row?.viaCode).toBe(code);
 	});
 });

@@ -2,11 +2,12 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { AccessCodeGate } from "@/app/_components/access-code-gate";
 import { ConsentGate } from "@/app/_components/consent-gate";
 import { EmailAuthForm } from "@/app/_components/email-auth-form";
 import { HomeInsights } from "@/app/_components/home-insights";
 import { TrialExpiredGate } from "@/app/_components/trial-expired-gate";
-import { isTrialExpired } from "@/server/access";
+import { hasAccessGranted, isTrialExpired } from "@/server/access";
 import { auth } from "@/server/better-auth";
 import { getSession } from "@/server/better-auth/server";
 import { hasCurrentConsent } from "@/server/consent";
@@ -132,6 +133,12 @@ export default async function Home() {
 				</div>
 			</main>
 		);
+	}
+
+	// First gate after signing in: an account nobody let into the beta doesn't
+	// get as far as the trial or consent questions.
+	if (!(await hasAccessGranted(session.user.id))) {
+		return <AccessCodeGate />;
 	}
 
 	if (isTrialExpired(session.user.createdAt)) {

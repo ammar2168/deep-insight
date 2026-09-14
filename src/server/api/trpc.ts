@@ -11,7 +11,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { ZodError } from "zod";
 
-import { isTrialExpired } from "@/server/access";
+import { hasAccessGranted, isTrialExpired } from "@/server/access";
 import { auth } from "@/server/better-auth";
 import { hasCurrentConsent } from "@/server/consent";
 import { db } from "@/server/db";
@@ -167,9 +167,35 @@ export const protectedProcedure = t.procedure
  * code: "FORBIDDEN" with this exact message is what the client watches for to
  * show the trial-ended screen instead of a generic error.
  */
+/**
+ * Access-granted procedure
+ *
+ * The beta's hard gate, and the first thing checked after authentication:
+ * every account has to be explicitly let in (by redeeming a code, or by
+ * predating the gate) before any other question — trial, consent, data —
+ * is even worth asking. settings.deleteAccount and settings.redeemCode
+ * deliberately stay on plain protectedProcedure: you must be able to enter
+ * the code that lets you in without already being in, and leaving is never
+ * gated on being allowed to stay.
+ *
+ * code: "FORBIDDEN" with this exact message is what the client watches for
+ * to show the access-code screen instead of a generic error.
+ */
+export const ACCESS_REQUIRED_MESSAGE = "ACCESS_REQUIRED";
+
+const accessGrantedProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+	if (!(await hasAccessGranted(ctx.session.user.id))) {
+		throw new TRPCError({
+			code: "FORBIDDEN",
+			message: ACCESS_REQUIRED_MESSAGE,
+		});
+	}
+	return next();
+});
+
 export const TRIAL_EXPIRED_MESSAGE = "TRIAL_EXPIRED";
 
-const trialActiveProcedure = protectedProcedure.use(({ ctx, next }) => {
+const trialActiveProcedure = accessGrantedProcedure.use(({ ctx, next }) => {
 	if (isTrialExpired(ctx.session.user.createdAt)) {
 		throw new TRPCError({
 			code: "FORBIDDEN",

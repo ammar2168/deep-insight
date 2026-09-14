@@ -7,7 +7,16 @@ import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { user } from "@/server/db/schema";
 
 export const settingsRouter = createTRPCRouter({
-	/** Raises the daily chat-question limit for accounts a valid code is entered on. Doesn't touch trial length. */
+	/**
+	 * Redeems a single-use code. Two effects, both in one transaction: it grants
+	 * the account access to the beta at all (see user_access — no row means the
+	 * access gate blocks everything), and it raises the daily chat-question
+	 * limit. Doesn't touch trial length.
+	 *
+	 * Stays on plain protectedProcedure rather than accessGrantedProcedure on
+	 * purpose: this is the one call an account with no access yet has to be able
+	 * to make, since it's the thing that gets them in.
+	 */
 	redeemCode: protectedProcedure
 		.input(z.object({ code: z.string().min(1) }))
 		.mutation(async ({ ctx, input }) => {
@@ -15,7 +24,7 @@ export const settingsRouter = createTRPCRouter({
 			if (!redeemed) {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
-					message: "That code isn't valid.",
+					message: "That code isn't valid, or it's already been used.",
 				});
 			}
 			return { redeemed: true as const };
