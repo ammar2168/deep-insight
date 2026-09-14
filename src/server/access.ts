@@ -3,11 +3,24 @@ import "server-only";
 import { and, eq, isNull } from "drizzle-orm";
 
 import { db } from "@/server/db";
-import { accessCodes, chatUsage } from "@/server/db/schema";
+import { accessCodes, chatUsage, userAccess } from "@/server/db/schema";
 
 export const TRIAL_LENGTH_DAYS = 30;
 export const FREE_DAILY_CHAT_LIMIT = 3;
-export const BOOSTED_DAILY_CHAT_LIMIT = 7;
+export const BOOSTED_DAILY_CHAT_LIMIT = 5;
+
+/**
+ * The beta's hard gate: every account must be explicitly let in, either by
+ * redeeming a code or by predating the gate (see the user_access table).
+ * Checked before trial and consent — an account nobody let in doesn't get as
+ * far as those questions.
+ */
+export async function hasAccessGranted(userId: string): Promise<boolean> {
+	const row = await db.query.userAccess.findFirst({
+		where: eq(userAccess.userId, userId),
+	});
+	return row !== undefined;
+}
 
 export function isTrialExpired(accountCreatedAt: Date): boolean {
 	const expiresAt = new Date(accountCreatedAt);
@@ -81,20 +94,31 @@ export async function redeemAccessCode(
 	userId: string,
 	code: string,
 ): Promise<boolean> {
-	const [claimed] = await db
-		.update(accessCodes)
-		.set({ redeemedAt: new Date(), redeemedByUserId: userId })
-		.where(and(eq(accessCodes.code, code), isNull(accessCodes.redeemedAt)))
-		.returning();
+	return db.transaction(async (tx) => {
+		const [claimed] = await tx
+			.update(accessCodes)
+			.set({ redeemedAt: new Date(), redeemedByUserId: userId })
+			.where(and(eq(accessCodes.code, code), isNull(accessCodes.redeemedAt)))
+			.returning();
 
-	if (!claimed) return false;
+		if (!claimed) return false;
 
-	await db
-		.insert(chatUsage)
-		.values({ userId, usageDate: todayUTC(), codeRedeemed: true })
-		.onConflictDoUpdate({
-			target: chatUsage.userId,
-			set: { codeRedeemed: true },
-		});
-	return true;
+		// All three writes commit together, or none do. Spending the code and
+		// granting access have to be the same atomic act now that the code is
+		// what gets someone in at all — a crash between them would burn a
+		// person's only code and still leave them locked out.
+		await tx
+			.insert(userAccess)
+			.values({ userId, viaCode: code })
+			.onConflictDoNothing();
+
+		await tx
+			.insert(chatUsage)
+			.values({ userId, usageDate: todayUTC(), codeRedeemed: true })
+			.onConflictDoUpdate({
+				target: chatUsage.userId,
+				set: { codeRedeemed: true },
+			});
+		return true;
+	});
 }

@@ -1,18 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 
+import { CrisisCheckInModal } from "@/app/_components/crisis-check-in-modal";
 import {
 	createPhotosFromFiles,
-	DayCapture,
+	fileToCompressedDataUrl,
 	formatEntryDate,
 	getLocalDateString,
 	type Photo,
 	PhotoPicker,
+	SpinnerIcon,
 } from "@/app/_components/day-capture";
+import { errorMessage } from "@/lib/error-message";
+import { api } from "@/trpc/react";
 
-type DayGroup = { id: string; date: string; photos: Photo[] };
+const MAX_PHOTOS = 50;
 
 function BackIcon() {
 	return (
@@ -30,103 +34,331 @@ function BackIcon() {
 	);
 }
 
-function newGroup(): DayGroup {
-	return { id: crypto.randomUUID(), date: getLocalDateString(), photos: [] };
+/**
+ * Looks for an unambiguous YYYY-MM-DD (or YYYYMMDD / YYYY_MM_DD) date
+ * anywhere in a filename. A locale-dependent numeric order (03-04-2024) is
+ * too ambiguous to guess at silently, so that still falls through — but a
+ * month-name filename is handled by resolveFilenameDate below, which tries
+ * this first and falls back to the same casual parser quick entry uses.
+ */
+function parseFilenameDate(filename: string): string | null {
+	const match = filename.match(/(\d{4})[-_]?(\d{2})[-_]?(\d{2})/);
+	if (!match) return null;
+	const [, year, month, day] = match;
+	// biome-ignore lint/style/noNonNullAssertion: the regex guarantees these three groups
+	const iso = `${year}-${month}-${day!}`;
+	const asDate = new Date(`${iso}T00:00:00Z`);
+	const isReal =
+		asDate.getUTCFullYear() === Number(year) &&
+		asDate.getUTCMonth() === Number(month) - 1 &&
+		asDate.getUTCDate() === Number(day);
+	return isReal ? iso : null;
 }
 
+const MONTH_NAMES: Record<string, number> = {
+	jan: 0,
+	feb: 1,
+	mar: 2,
+	apr: 3,
+	may: 4,
+	jun: 5,
+	jul: 6,
+	aug: 7,
+	sep: 8,
+	oct: 9,
+	nov: 10,
+	dec: 11,
+};
+
+/**
+ * Turns a casually-typed date ("Sep 3", "3 Sept", "September 3rd, 2024") into
+ * YYYY-MM-DD, for the one field where correctness matters most — a date the
+ * app couldn't determine on its own. Never guesses a year silently beyond the
+ * same rule the server already applies to dates read off the page itself: no
+ * year given means the most recent occurrence, not the current year outright.
+ * Returns null on anything it isn't confident about, on purpose — the caller
+ * always shows the result back before it's ever saved, it's never applied
+ * without that.
+ */
+function parseCasualDate(
+	raw: string,
+	referenceDate: Date = new Date(),
+): string | null {
+	const trimmed = raw.trim();
+	const monthFirst = trimmed.match(
+		/^([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?$/,
+	);
+	const dayFirst = trimmed.match(
+		/^(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?(?:,?\s+(\d{4}))?$/,
+	);
+	const match = monthFirst ?? dayFirst;
+	if (!match) return null;
+
+	const monthStr = monthFirst ? monthFirst[1] : dayFirst?.[2];
+	const dayStr = monthFirst ? monthFirst[2] : dayFirst?.[1];
+	const yearStr = monthFirst ? monthFirst[3] : dayFirst?.[3];
+	if (!monthStr || !dayStr) return null;
+
+	const month = MONTH_NAMES[monthStr.slice(0, 3).toLowerCase()];
+	if (month === undefined) return null;
+	const day = Number(dayStr);
+	if (day < 1 || day > 31) return null;
+
+	let year = yearStr ? Number(yearStr) : referenceDate.getUTCFullYear();
+	if (!yearStr && Date.UTC(year, month, day) > referenceDate.getTime()) {
+		year -= 1;
+	}
+
+	const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+	const asDate = new Date(`${iso}T00:00:00Z`);
+	const isReal =
+		asDate.getUTCFullYear() === year &&
+		asDate.getUTCMonth() === month &&
+		asDate.getUTCDate() === day;
+	return isReal ? iso : null;
+}
+
+/**
+ * The one function the pipeline actually calls for a filename: strict ISO
+ * first, then the same casual parser quick entry uses, against the filename
+ * with its extension stripped and separators normalized to spaces — so
+ * "2024-09-02.jpg" and "2 Sep 2024.jpg" both resolve, matching the two
+ * examples shown to the user, but "vacation_photo_final.jpg" correctly finds
+ * nothing rather than guessing at a fragment.
+ */
+function resolveFilenameDate(filename: string): string | null {
+	const strict = parseFilenameDate(filename);
+	if (strict) return strict;
+	const withoutExtension = filename.replace(/\.[^.]+$/, "");
+	return parseCasualDate(withoutExtension.replace(/[-_]+/g, " "));
+}
+
+type PhotoItem = { photo: Photo; text: string; date: string | null };
+
+type GroupResult =
+	| { date: string; status: "saved"; insightCount: number; manualDate: boolean }
+	| { date: string; status: "failed"; reason: string };
+
+type Phase =
+	| { kind: "select" }
+	| { kind: "processing"; stage: "reading" | "saving" }
+	| {
+			kind: "need-date";
+			item: PhotoItem;
+			position: number;
+			total: number;
+			suggestion: string | null;
+	  }
+	| { kind: "summary"; results: GroupResult[]; skipped: string[] };
+
+/**
+ * Three passes over the same photos, rather than one pass that decides
+ * everything inline:
+ *   1. Read every photo (OCR), trying a date from its filename, then its own
+ *      content — never blocking the pass on one ambiguous photo.
+ *   2. Resolve whatever photos didn't get a date, one at a time, in order.
+ *      No page is ever silently assumed to continue the previous one; if the
+ *      date can't be determined, the user is asked, always.
+ *   3. Now that every photo has a real date, group consecutive same-date
+ *      photos into one entry and save — identical logic to a pre-grouped day.
+ */
 export default function BatchCapturePage() {
-	const [groups, setGroups] = useState<DayGroup[]>(() => [newGroup()]);
-	const [started, setStarted] = useState(false);
-	const [activeIndex, setActiveIndex] = useState(0);
+	const [photos, setPhotos] = useState<Photo[]>([]);
+	const [phase, setPhase] = useState<Phase>({ kind: "select" });
+	const [progress, setProgress] = useState({ current: 0, total: 0 });
+	const [completed, setCompleted] = useState<GroupResult[]>([]);
+	const [pickError, setPickError] = useState<string | null>(null);
+	const [showCrisisModal, setShowCrisisModal] = useState(false);
 
-	function addGroup() {
-		setGroups((prev) => [...prev, newGroup()]);
-	}
+	const dateResolveRef = useRef<((date: string) => void) | null>(null);
+	const crisisResolveRef = useRef<(() => void) | null>(null);
 
-	function removeGroup(id: string) {
-		setGroups((prev) => prev.filter((g) => g.id !== id));
-	}
+	const extractTextMutation = api.entry.extractText.useMutation();
+	const extractInsightsMutation = api.entry.extractInsights.useMutation();
+	const saveMutation = api.entry.save.useMutation();
 
-	function setGroupDate(id: string, date: string) {
-		setGroups((prev) => prev.map((g) => (g.id === id ? { ...g, date } : g)));
-	}
-
-	function addPhotosToGroup(id: string, files: FileList | null) {
+	function addPhotos(files: FileList | null) {
 		if (!files) return;
+		setPickError(null);
 		const next = createPhotosFromFiles(files);
-		setGroups((prev) =>
-			prev.map((g) =>
-				g.id === id ? { ...g, photos: [...g.photos, ...next] } : g,
-			),
-		);
+		setPhotos((prev) => {
+			const combined = [...prev, ...next];
+			if (combined.length > MAX_PHOTOS) {
+				setPickError(
+					`Up to ${MAX_PHOTOS} pages at a time — you've added ${combined.length}. Remove a few, or run the rest as a second batch.`,
+				);
+			}
+			return combined;
+		});
 	}
 
-	function removePhotoFromGroup(groupId: string, photoId: string) {
-		setGroups((prev) =>
-			prev.map((g) =>
-				g.id === groupId
-					? { ...g, photos: g.photos.filter((p) => p.id !== photoId) }
-					: g,
-			),
-		);
+	function removePhoto(id: string) {
+		setPhotos((prev) => {
+			const next = prev.filter((p) => p.id !== id);
+			if (next.length <= MAX_PHOTOS) setPickError(null);
+			return next;
+		});
 	}
 
-	const canStart =
-		groups.length > 0 &&
-		groups.every((g) => g.photos.length > 0 && g.date.length > 0);
-
-	if (started) {
-		// biome-ignore lint/style/noNonNullAssertion: activeIndex is always clamped to a valid groups index
-		const activeGroup = groups[activeIndex]!;
-		const isLastDay = activeIndex === groups.length - 1;
-
-		return (
-			<main
-				className="relative min-h-screen bg-indigo-700 text-paper-100"
-				style={{
-					backgroundImage:
-						"repeating-linear-gradient(115deg, var(--color-crease) 0px, var(--color-crease) 1px, transparent 1px, transparent 96px)",
-				}}
-			>
-				<div className="mx-auto flex max-w-5xl flex-col gap-6 px-6 py-12 sm:px-10 sm:py-16">
-					<Link
-						className="inline-flex w-fit items-center gap-1.5 text-indigo-400 text-sm underline decoration-indigo-500/40 underline-offset-4 hover:text-paper-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
-						href="/"
-					>
-						<BackIcon />
-						Home
-					</Link>
-
-					<DayCapture
-						description="Catching up on several days — each one folds into its own entry."
-						eyebrow={`Day ${activeIndex + 1} of ${groups.length}`}
-						initialDate={activeGroup.date}
-						initialPhotos={activeGroup.photos}
-						key={activeGroup.id}
-						renderSavedAction={() =>
-							isLastDay ? (
-								<Link
-									className="mt-2 inline-flex items-center justify-center gap-2 rounded-full bg-indigo-600 px-6 py-3 font-medium text-paper-100 text-sm transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
-									href="/"
-								>
-									Back to your insights
-								</Link>
-							) : (
-								<button
-									className="mt-2 inline-flex items-center justify-center gap-2 rounded-full bg-indigo-600 px-6 py-3 font-medium text-paper-100 text-sm transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
-									onClick={() => setActiveIndex((i) => i + 1)}
-									type="button"
-								>
-									Next day
-								</button>
-							)
-						}
-						title={formatEntryDate(activeGroup.date)}
-					/>
-				</div>
-			</main>
-		);
+	function waitForManualDate(
+		item: PhotoItem,
+		position: number,
+		total: number,
+		suggestion: string | null,
+	): Promise<string> {
+		return new Promise((resolve) => {
+			dateResolveRef.current = resolve;
+			setPhase({ kind: "need-date", item, position, total, suggestion });
+		});
 	}
+
+	function submitManualDate(date: string) {
+		setPhase({ kind: "processing", stage: "reading" });
+		dateResolveRef.current?.(date);
+		dateResolveRef.current = null;
+	}
+
+	function waitForCrisisContinue(): Promise<void> {
+		return new Promise((resolve) => {
+			crisisResolveRef.current = resolve;
+			setShowCrisisModal(true);
+		});
+	}
+
+	function handleCrisisContinue() {
+		setShowCrisisModal(false);
+		crisisResolveRef.current?.();
+		crisisResolveRef.current = null;
+	}
+
+	async function runPipeline() {
+		setPhase({ kind: "processing", stage: "reading" });
+		setCompleted([]);
+		const items: PhotoItem[] = [];
+		const skipped: string[] = [];
+
+		// Pass 1: read every photo, no blocking on an undetermined date.
+		for (let i = 0; i < photos.length; i++) {
+			// biome-ignore lint/style/noNonNullAssertion: i is always a valid index into photos
+			const photo = photos[i]!;
+			setProgress({ current: i + 1, total: photos.length });
+
+			let text: string;
+			let mentionedDates: { rawText: string; resolvedDate: string }[];
+			let crisis: boolean;
+			try {
+				const base64 = await fileToCompressedDataUrl(photo.file);
+				const ocr = await extractTextMutation.mutateAsync({
+					photos: [{ base64, mediaType: "image/jpeg" }],
+				});
+				text = ocr.text;
+				mentionedDates = ocr.mentionedDates;
+				crisis = ocr.crisis;
+			} catch {
+				skipped.push(photo.name);
+				continue;
+			}
+
+			if (crisis) {
+				await waitForCrisisContinue();
+			}
+
+			const date =
+				resolveFilenameDate(photo.name) ??
+				mentionedDates[0]?.resolvedDate ??
+				null;
+			items.push({ photo, text, date });
+		}
+
+		// Pass 2: resolve whatever couldn't be determined, one at a time. The
+		// nearest earlier resolved date is offered as a pre-filled suggestion
+		// (multi-page entries often don't repeat the date on every page) but
+		// it's never applied without the user seeing and confirming it.
+		const undatedIndices = items
+			.map((_item, index) => index)
+			.filter((index) => items[index]?.date === null);
+		const manualIndices = new Set<number>();
+
+		for (let n = 0; n < undatedIndices.length; n++) {
+			// biome-ignore lint/style/noNonNullAssertion: n is always a valid index into undatedIndices
+			const index = undatedIndices[n]!;
+			// biome-ignore lint/style/noNonNullAssertion: index came from items itself
+			const item = items[index]!;
+			const suggestion =
+				items
+					.slice(0, index)
+					.reverse()
+					.find((it) => it.date !== null)?.date ?? null;
+			const chosen = await waitForManualDate(
+				item,
+				n + 1,
+				undatedIndices.length,
+				suggestion,
+			);
+			item.date = chosen;
+			manualIndices.add(index);
+		}
+
+		// Pass 3: every item now has a real date — group consecutive same-date
+		// items into one entry and save.
+		setPhase({ kind: "processing", stage: "saving" });
+		const results: GroupResult[] = [];
+		let currentGroup: {
+			date: string;
+			texts: string[];
+			manualDate: boolean;
+		} | null = null;
+
+		async function finalizeGroup() {
+			if (!currentGroup) return;
+			const { date, texts, manualDate } = currentGroup;
+			const text = texts.join("\n\n");
+			let result: GroupResult;
+			try {
+				const { insights } = await extractInsightsMutation.mutateAsync({
+					text,
+				});
+				await saveMutation.mutateAsync({ text, entryDate: date, insights });
+				result = {
+					date,
+					status: "saved",
+					insightCount: insights.length,
+					manualDate,
+				};
+			} catch (err) {
+				result = {
+					date,
+					status: "failed",
+					reason: errorMessage(err, "Something went wrong saving this one."),
+				};
+			}
+			results.push(result);
+			setCompleted((prev) => [...prev, result]);
+			currentGroup = null;
+		}
+
+		for (let i = 0; i < items.length; i++) {
+			// biome-ignore lint/style/noNonNullAssertion: i is always a valid index into items
+			const item = items[i]!;
+			// biome-ignore lint/style/noNonNullAssertion: every item's date is resolved by pass 2
+			const date = item.date!;
+			if (currentGroup && currentGroup.date === date) {
+				currentGroup.texts.push(item.text);
+			} else {
+				await finalizeGroup();
+				currentGroup = {
+					date,
+					texts: [item.text],
+					manualDate: manualIndices.has(i),
+				};
+			}
+		}
+		await finalizeGroup();
+
+		setPhase({ kind: "summary", results, skipped });
+	}
+
+	const canProcess = photos.length > 0 && photos.length <= MAX_PHOTOS;
 
 	return (
 		<main
@@ -138,106 +370,296 @@ export default function BatchCapturePage() {
 		>
 			<div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-12 sm:px-10 sm:py-16">
 				<Link
-					className="inline-flex w-fit items-center gap-1.5 text-indigo-400 text-sm underline decoration-indigo-500/40 underline-offset-4 hover:text-paper-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
+					className="inline-flex w-fit items-center gap-1.5 text-indigo-400 text-sm underline decoration-indigo-500/40 underline-offset-4 hover:text-paper-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400 focus-visible:outline-offset-2"
 					href="/"
 				>
 					<BackIcon />
 					Home
 				</Link>
 
-				<header className="flex flex-col gap-2 border-indigo-500 border-b pb-6">
-					<p className="font-mono text-indigo-400 text-xs uppercase tracking-[0.2em]">
-						Catching up
-					</p>
-					<h1 className="mt-1 font-semibold text-2xl text-paper-100 sm:text-3xl">
-						Add several days at once
-					</h1>
-					<p className="text-indigo-400 text-sm">
-						Group your photos by day below, then go through them one at a time.{" "}
-						<Link
-							className="underline decoration-indigo-500/40 underline-offset-4 hover:text-paper-100"
-							href="/capture"
-						>
-							Just one day?
-						</Link>
-					</p>
-				</header>
+				{phase.kind === "select" && (
+					<>
+						<header className="flex flex-col gap-2 border-indigo-500 border-b pb-6">
+							<p className="font-mono text-indigo-400 text-xs uppercase tracking-[0.2em]">
+								Catching up
+							</p>
+							<h1 className="mt-1 font-semibold text-2xl text-paper-100 sm:text-3xl">
+								Add several days at once
+							</h1>
+							<p className="text-indigo-400 text-sm">
+								Add every page, in the order they were written. We'll look for a
+								date on each page — if we can't find one, we'll ask once
+								everything else is sorted.{" "}
+								<Link
+									className="underline decoration-indigo-500/40 underline-offset-4 hover:text-paper-100"
+									href="/capture"
+								>
+									Just one day?
+								</Link>
+							</p>
+						</header>
 
-				<div className="flex flex-col gap-5">
-					{groups.map((group, i) => {
-						const dateInputId = `day-${i}-date`;
-						return (
-							<div
-								className="rounded-sm bg-paper-100 p-6 text-ink-900 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.6)] sm:p-8"
-								key={group.id}
-							>
-								<div className="flex items-center justify-between">
-									<h2 className="font-semibold text-ink-900 text-lg">
-										Day {i + 1}
-									</h2>
-									{groups.length > 1 && (
-										<button
-											className="text-ink-600 text-xs underline decoration-indigo-500/40 underline-offset-4 hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
-											onClick={() => removeGroup(group.id)}
-											type="button"
-										>
-											Remove this day
-										</button>
-									)}
-								</div>
-
-								<div className="mt-4 flex flex-col gap-1">
-									<label
-										className="font-mono text-[11px] text-ink-600 uppercase tracking-wide"
-										htmlFor={dateInputId}
-									>
-										Date
-									</label>
-									<input
-										className="w-fit rounded-sm border border-indigo-500/20 bg-paper-200 px-3 py-2 text-[15px] text-ink-900 transition-colors focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
-										id={dateInputId}
-										max={getLocalDateString()}
-										onChange={(e) => setGroupDate(group.id, e.target.value)}
-										type="date"
-										value={group.date}
-									/>
-								</div>
-
-								<div className="mt-4">
-									<PhotoPicker
-										hint="Add every page for this day."
-										label="Add a photo of a page"
-										onAdd={(files) => addPhotosToGroup(group.id, files)}
-										onRemove={(photoId) =>
-											removePhotoFromGroup(group.id, photoId)
-										}
-										photos={group.photos}
-									/>
-								</div>
+						<section className="rounded-sm bg-paper-100 p-6 text-ink-900 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.6)] sm:p-8">
+							<div className="mb-6 flex flex-col gap-1.5 rounded-sm bg-paper-200 p-4">
+								<p className="font-mono text-[11px] text-ink-600 uppercase tracking-wide">
+									For the smoothest results
+								</p>
+								<p className="text-ink-600 text-sm">
+									Write the date somewhere on each page you photograph.
+								</p>
+								<p className="text-ink-600 text-sm">
+									Or name the file with the date —{" "}
+									<span className="font-mono text-ink-900">2024-09-02</span> or
+									"2 Sep 2024" both work — the same date on every page from that
+									day.
+								</p>
 							</div>
-						);
-					})}
 
-					<button
-						className="flex items-center justify-center gap-2 rounded-sm border border-indigo-400/40 border-dashed px-4 py-3 text-center text-indigo-300 text-sm transition-colors hover:border-indigo-300 hover:text-paper-100"
-						onClick={addGroup}
-						type="button"
-					>
-						+ Add another day
-					</button>
-				</div>
+							<PhotoPicker
+								hint="Every page, in order."
+								label="Add pages"
+								onAdd={addPhotos}
+								onRemove={removePhoto}
+								photos={photos}
+							/>
+							{pickError && (
+								<p className="mt-4 text-ink-600 text-sm">{pickError}</p>
+							)}
+						</section>
 
-				<div className="flex justify-end">
-					<button
-						className="inline-flex items-center gap-2 rounded-sm bg-indigo-600 px-5 py-2.5 font-medium text-paper-100 text-sm transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
-						disabled={!canStart}
-						onClick={() => setStarted(true)}
-						type="button"
-					>
-						Start with Day 1
-					</button>
+						<div className="flex justify-end">
+							<button
+								className="inline-flex items-center gap-2 rounded-full bg-indigo-600 px-6 py-3 font-medium text-paper-100 text-sm transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+								disabled={!canProcess}
+								onClick={runPipeline}
+								type="button"
+							>
+								Process {photos.length || ""}{" "}
+								{photos.length === 1 ? "page" : "pages"}
+							</button>
+						</div>
+					</>
+				)}
+
+				{phase.kind === "processing" && (
+					<section className="rounded-sm bg-paper-100 p-6 text-ink-900 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.6)] sm:p-8">
+						<div className="flex items-center gap-3 text-ink-900">
+							<SpinnerIcon />
+							<p className="font-medium text-sm">
+								{phase.stage === "reading" ? (
+									<>
+										Reading page{" "}
+										<span className="font-mono tabular-nums">
+											{progress.current}
+										</span>{" "}
+										of{" "}
+										<span className="font-mono tabular-nums">
+											{progress.total}
+										</span>
+									</>
+								) : (
+									"Saving your entries…"
+								)}
+							</p>
+						</div>
+						<p className="mt-2 text-ink-600 text-sm">
+							This can take a few minutes for a big batch — keep this tab open,
+							and we'll drop you at your insights when it's done.
+						</p>
+
+						{completed.length > 0 && (
+							<ul className="mt-6 flex flex-col gap-1.5 border-indigo-500/20 border-t pt-4">
+								{completed.map((r) => (
+									<li
+										className="text-ink-600 text-sm"
+										key={`${r.date}-${r.status}`}
+									>
+										{formatEntryDate(r.date)} —{" "}
+										{r.status === "saved" ? (
+											<span className="text-ink-900">
+												{r.insightCount}{" "}
+												{r.insightCount === 1 ? "insight" : "insights"} saved
+											</span>
+										) : (
+											"couldn't be saved"
+										)}
+									</li>
+								))}
+							</ul>
+						)}
+					</section>
+				)}
+
+				{phase.kind === "need-date" && (
+					<NeedDateCard
+						item={phase.item}
+						key={phase.item.photo.id}
+						onSubmit={submitManualDate}
+						position={phase.position}
+						suggestion={phase.suggestion}
+						total={phase.total}
+					/>
+				)}
+
+				{phase.kind === "summary" && (
+					<SummaryPanel results={phase.results} skipped={phase.skipped} />
+				)}
+			</div>
+
+			{showCrisisModal && (
+				<CrisisCheckInModal onContinue={handleCrisisContinue} />
+			)}
+		</main>
+	);
+}
+
+function NeedDateCard({
+	item,
+	position,
+	total,
+	suggestion,
+	onSubmit,
+}: {
+	item: PhotoItem;
+	position: number;
+	total: number;
+	suggestion: string | null;
+	onSubmit: (date: string) => void;
+}) {
+	const [date, setDate] = useState(suggestion ?? "");
+	const dateInputId = useId();
+
+	return (
+		<section className="rounded-sm bg-paper-100 p-6 text-ink-900 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.6)] sm:p-8">
+			<p className="font-mono text-ink-600 text-xs uppercase tracking-[0.2em]">
+				{total === 1
+					? "One page needs a date"
+					: `Page ${position} of ${total} without a date`}
+			</p>
+			<h2 className="mt-2 font-semibold text-ink-900 text-lg">
+				What date is this page?
+			</h2>
+			<p className="mt-1 text-ink-600 text-sm">
+				We couldn't find a date on it, in its content or its filename.
+			</p>
+
+			<div className="mt-4 flex flex-col gap-4 sm:flex-row">
+				{/* biome-ignore lint/performance/noImgElement: object URL from local file input */}
+				<img
+					alt={item.photo.name}
+					className="h-48 w-40 shrink-0 rounded-sm border border-indigo-500/30 object-cover"
+					src={item.photo.url}
+				/>
+				<div className="max-h-48 overflow-y-auto rounded-sm bg-paper-200 p-3 text-ink-600 text-sm">
+					{item.text || "No text could be read from this page."}
 				</div>
 			</div>
-		</main>
+
+			<div className="mt-4 flex flex-col gap-1.5">
+				<label
+					className="font-mono text-[11px] text-ink-600 uppercase tracking-wide"
+					htmlFor={dateInputId}
+				>
+					Date
+				</label>
+				<input
+					className="w-fit rounded-sm border border-indigo-500/20 bg-paper-200 px-3 py-2 text-[15px] text-ink-900 transition-colors focus:border-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+					id={dateInputId}
+					max={getLocalDateString()}
+					onChange={(e) => setDate(e.target.value)}
+					type="date"
+					value={date}
+				/>
+				{suggestion && date === suggestion && (
+					<p className="text-ink-600 text-xs">
+						Pre-filled with the date from the page before it — change it if
+						that's not right.
+					</p>
+				)}
+			</div>
+
+			<div className="mt-5 flex justify-end">
+				<button
+					className="inline-flex items-center gap-2 rounded-full bg-indigo-600 px-6 py-3 font-medium text-paper-100 text-sm transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+					disabled={!date}
+					onClick={() => onSubmit(date)}
+					type="button"
+				>
+					Continue
+				</button>
+			</div>
+		</section>
+	);
+}
+
+function SummaryPanel({
+	results,
+	skipped,
+}: {
+	results: GroupResult[];
+	skipped: string[];
+}) {
+	const saved = results.filter((r) => r.status === "saved");
+	const failed = results.filter((r) => r.status === "failed");
+	const manualCount = saved.filter(
+		(r) => r.status === "saved" && r.manualDate,
+	).length;
+
+	return (
+		<section className="rounded-sm bg-paper-100 p-6 text-ink-900 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.6)] sm:p-8">
+			<h2 className="font-semibold text-2xl text-ink-900">
+				{saved.length} {saved.length === 1 ? "day" : "days"} added
+			</h2>
+			<p className="mt-1 text-ink-600 text-sm">
+				{manualCount > 0 &&
+					`${manualCount} needed a date you entered yourself. `}
+				{skipped.length > 0 &&
+					`${skipped.length} ${skipped.length === 1 ? "page" : "pages"} couldn't be read and ${skipped.length === 1 ? "was" : "were"} skipped. `}
+				{failed.length === 0 && manualCount === 0 && skipped.length === 0
+					? "Every page came through cleanly."
+					: null}
+			</p>
+
+			{failed.length > 0 && (
+				<div className="mt-4 flex flex-col gap-1.5 border-indigo-500/20 border-t pt-4">
+					<p className="font-mono text-[11px] text-ink-600 uppercase tracking-wide">
+						Needs another look
+					</p>
+					{failed.map((r) => (
+						<p className="text-ink-600 text-sm" key={r.date}>
+							{formatEntryDate(r.date)} — {r.reason}
+						</p>
+					))}
+				</div>
+			)}
+
+			{skipped.length > 0 && (
+				<div className="mt-4 flex flex-col gap-1.5 border-indigo-500/20 border-t pt-4">
+					<p className="font-mono text-[11px] text-ink-600 uppercase tracking-wide">
+						Skipped pages
+					</p>
+					{skipped.map((name) => (
+						<p className="text-ink-600 text-sm" key={name}>
+							{name} — add it individually from{" "}
+							<Link
+								className="underline decoration-indigo-500/40 underline-offset-4"
+								href="/capture"
+							>
+								a single day
+							</Link>
+						</p>
+					))}
+				</div>
+			)}
+
+			<div className="mt-6 flex justify-end">
+				<Link
+					className="inline-flex items-center justify-center gap-2 rounded-full bg-indigo-600 px-6 py-3 font-medium text-paper-100 text-sm transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400 focus-visible:outline-offset-2"
+					href="/"
+				>
+					Back to your insights
+				</Link>
+			</div>
+		</section>
 	);
 }

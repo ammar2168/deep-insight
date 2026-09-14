@@ -8,4 +8,5 @@ export * from "./insight";
 export * from "./relations";
 export * from "./session";
 export * from "./user";
+export * from "./user-access";
 export * from "./verification";

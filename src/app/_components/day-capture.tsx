@@ -67,7 +67,7 @@ const PHOTO_JPEG_QUALITY = 0.82;
  * client then chokes trying to parse it). 1600px on the long side is far more
  * than the OCR step needs to read handwriting accurately.
  */
-function fileToCompressedDataUrl(file: File): Promise<string> {
+export function fileToCompressedDataUrl(file: File): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const objectUrl = URL.createObjectURL(file);
 		const img = new Image();
@@ -191,7 +191,7 @@ function UploadIcon() {
 	);
 }
 
-function SpinnerIcon() {
+export function SpinnerIcon() {
 	return (
 		<svg
 			aria-hidden="true"

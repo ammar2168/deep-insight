@@ -4,9 +4,12 @@
 // for whichever account redeems it first, and never again after that, no
 // matter how many other people might also have the string.
 //
-// Run against local dev by default (reads DATABASE_URL from .env). To
-// generate a code for prod instead, run with the prod DATABASE_URL:
-//   DATABASE_URL="$(grep '^DATABASE_URL_UNPOOLED=' .env.production.local | cut -d= -f2- | tr -d '"')" node scripts/generate-access-code.mjs
+// Runs against local dev by default (reads DATABASE_URL from .env). A code
+// only works in the database it was minted in, so for a real beta user, pass
+// prod's connection string, copied from Neon's own dashboard (Vercel's copy is
+// marked Sensitive and can never be pulled back down). A DATABASE_URL given on
+// the command line wins over the one in .env:
+//   DATABASE_URL='<connection string from Neon>' node scripts/generate-access-code.mjs
 import postgres from "postgres";
 
 try {
@@ -36,7 +39,10 @@ try {
 	// created_at's default is applied by Drizzle at the query-builder level, not
 	// the database schema itself — this raw insert has to set it explicitly.
 	await sql`INSERT INTO access_code (code, created_at) VALUES (${code}, now())`;
-	console.log(`\nNew access code: ${code}\n`);
+	console.log(`\nNew access code: ${code}`);
+	// Host only, never credentials: enough to tell dev from prod at a glance
+	// before sending a code to someone it would silently fail for.
+	console.log(`Minted in: ${new URL(process.env.DATABASE_URL).hostname}\n`);
 	console.log("Single-use — good for whoever redeems it first, then dead.");
 } finally {
 	await sql.end();
