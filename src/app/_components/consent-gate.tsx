@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { errorMessage } from "@/lib/error-message";
-import { authClient } from "@/server/better-auth/client";
+import { signOutAndReload } from "@/server/better-auth/client";
 import { api } from "@/trpc/react";
 
 export function ConsentGate() {
@@ -77,11 +77,7 @@ export function ConsentGate() {
 				</button>
 				<button
 					className="text-ink-600 text-xs underline decoration-indigo-500/40 underline-offset-4 hover:text-ink-900"
-					onClick={() =>
-						authClient.signOut({
-							fetchOptions: { onSuccess: () => router.push("/") },
-						})
-					}
+					onClick={() => void signOutAndReload()}
 					type="button"
 				>
 					Not right now — sign out instead

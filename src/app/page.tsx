@@ -1,4 +1,3 @@
-import { headers } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -6,6 +5,7 @@ import { AccessCodeGate } from "@/app/_components/access-code-gate";
 import { ConsentGate } from "@/app/_components/consent-gate";
 import { EmailAuthForm } from "@/app/_components/email-auth-form";
 import { HomeInsights } from "@/app/_components/home-insights";
+import { SignOutButton } from "@/app/_components/sign-out-button";
 import { TrialExpiredGate } from "@/app/_components/trial-expired-gate";
 import { hasAccessGranted, isTrialExpired } from "@/server/access";
 import { auth } from "@/server/better-auth";
@@ -176,21 +176,7 @@ export default async function Home() {
 								>
 									Settings
 								</Link>
-								<form>
-									<button
-										className="whitespace-nowrap text-indigo-400 text-sm underline decoration-indigo-500/40 underline-offset-4 hover:text-paper-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400 focus-visible:outline-offset-2"
-										formAction={async () => {
-											"use server";
-											await auth.api.signOut({
-												headers: await headers(),
-											});
-											redirect("/");
-										}}
-										type="submit"
-									>
-										Sign out
-									</button>
-								</form>
+								<SignOutButton className="whitespace-nowrap text-indigo-400 text-sm underline decoration-indigo-500/40 underline-offset-4 hover:text-paper-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400 focus-visible:outline-offset-2" />
 							</div>
 						</header>
 

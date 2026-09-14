@@ -1,11 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 
 import { errorMessage } from "@/lib/error-message";
-import { authClient } from "@/server/better-auth/client";
+import { signOutAndReload } from "@/server/better-auth/client";
 import { api } from "@/trpc/react";
 
 function BackIcon() {
@@ -110,7 +109,6 @@ function AccessCodeSection() {
 const DELETE_CONFIRM_PHRASE = "DELETE";
 
 function DeleteAccountSection() {
-	const router = useRouter();
 	const confirmInputId = useId();
 	const [expanded, setExpanded] = useState(false);
 	const [confirmText, setConfirmText] = useState("");
@@ -128,8 +126,7 @@ function DeleteAccountSection() {
 		setIsFinishing(true);
 		try {
 			await deleteMutation.mutateAsync();
-			await authClient.signOut();
-			router.push("/");
+			await signOutAndReload();
 		} catch (err) {
 			setIsFinishing(false);
 			setError(errorMessage(err, "Couldn't delete your account. Try again?"));
