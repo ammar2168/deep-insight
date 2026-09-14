@@ -1,13 +1,11 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 
 import { errorMessage } from "@/lib/error-message";
-import { authClient } from "@/server/better-auth/client";
+import { authClient, reloadIntoApp } from "@/server/better-auth/client";
 
 export function EmailAuthForm() {
-	const router = useRouter();
 	const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in");
 	const [name, setName] = useState("");
 	const [email, setEmail] = useState("");
@@ -39,8 +37,7 @@ export function EmailAuthForm() {
 				setPending(false);
 				return;
 			}
-			router.push("/");
-			router.refresh();
+			reloadIntoApp();
 		} catch (err) {
 			setError(errorMessage(err, "Something went wrong. Try again?"));
 			setPending(false);

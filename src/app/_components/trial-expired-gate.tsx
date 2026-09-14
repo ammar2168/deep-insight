@@ -1,12 +1,8 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-
-import { authClient } from "@/server/better-auth/client";
+import { signOutAndReload } from "@/server/better-auth/client";
 
 export function TrialExpiredGate() {
-	const router = useRouter();
-
 	return (
 		<main
 			className="relative flex min-h-screen items-center justify-center bg-indigo-700 px-6 py-16 text-paper-100"
@@ -28,11 +24,7 @@ export function TrialExpiredGate() {
 				</p>
 				<button
 					className="w-full rounded-full bg-indigo-600 px-6 py-3 font-medium text-paper-100 text-sm transition-colors hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 focus-visible:outline-offset-2"
-					onClick={() =>
-						authClient.signOut({
-							fetchOptions: { onSuccess: () => router.push("/") },
-						})
-					}
+					onClick={() => void signOutAndReload()}
 					type="button"
 				>
 					Sign out
