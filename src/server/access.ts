@@ -7,7 +7,7 @@ import { accessCodes, chatUsage, userAccess } from "@/server/db/schema";
 
 export const TRIAL_LENGTH_DAYS = 30;
 export const FREE_DAILY_CHAT_LIMIT = 3;
-export const BOOSTED_DAILY_CHAT_LIMIT = 7;
+export const BOOSTED_DAILY_CHAT_LIMIT = 5;
 
 /**
  * The beta's hard gate: every account must be explicitly let in, either by
