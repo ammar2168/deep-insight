@@ -198,6 +198,13 @@ export type ExtractedInsight = {
 const RECORD_INSIGHTS_TOOL = {
 	name: "record_insights",
 	description: "Record the discrete insights extracted from a journal entry.",
+	// The API validates the model's arguments against this schema before they
+	// reach us at all, which is what actually stops the failure this code used
+	// to only recover from after the fact: the whole list arriving as one
+	// JSON-encoded string. Real prod incident — 50 pages read successfully, 4
+	// of 8 days lost at this step. `strict` requires `additionalProperties:
+	// false` alongside `required` on every object in the schema.
+	strict: true,
 	input_schema: {
 		type: "object" as const,
 		properties: {
@@ -223,10 +230,12 @@ const RECORD_INSIGHTS_TOOL = {
 						},
 					},
 					required: ["category", "label", "value"],
+					additionalProperties: false,
 				},
 			},
 		},
 		required: ["insights"],
+		additionalProperties: false,
 	},
 };
 
@@ -275,8 +284,15 @@ ${text}
 		}
 
 		const input = toolUse.input as { insights?: unknown };
-		const insights = normalizeInsightsShape(input.insights);
-		if (insights) return insights;
+		const normalized = normalizeInsightsShape(input.insights);
+		if (normalized) {
+			if (normalized.dropped > 0) {
+				console.warn(
+					`[extractInsights] kept ${normalized.insights.length}, dropped ${normalized.dropped} malformed item(s)`,
+				);
+			}
+			return normalized.insights;
+		}
 
 		// A long real entry can also push a truncated tool call's JSON into a
 		// shape that isn't a clean array, and casting alone won't catch that at
@@ -286,7 +302,10 @@ ${text}
 		// "X.map is not a function" wherever the caller expects a list.
 		// Logs shape only, never the model's actual output — that output is
 		// derived from the user's own journal text.
-		lastFailure = `typeof insights=${typeof input.insights}, keys=${Object.keys(toolUse.input as object).join(",")}`;
+		// The old version of this line logged only the outermost type, which is
+		// why a real prod failure could repeat for days without ever saying
+		// which check rejected it.
+		lastFailure = `typeof insights=${typeof input.insights}, ${describeInsightsFailure(input.insights)}`;
 		console.error(
 			`[extractInsights] attempt=${attempt} malformed tool response, stop_reason=${response.stop_reason}, ${lastFailure}`,
 		);
@@ -309,28 +328,83 @@ ${text}
  * mocking the Claude API itself. Returns null on anything not confidently a
  * real list of insights; never guesses at partial or malformed data.
  */
+/**
+ * Recovers the usable insights from whatever the model actually sent, or null
+ * if nothing in it can be trusted.
+ *
+ * Deliberately per-item rather than all-or-nothing. The first version of this
+ * required every item to be well-formed, so a single invented category threw
+ * away four perfectly good insights alongside it — and the caller's retry then
+ * failed identically, losing the whole entry. Dropping only the bad items is
+ * strictly better: nothing unvalidated is ever returned, and one bad item
+ * costs one insight instead of a day of someone's journal.
+ */
 export function normalizeInsightsShape(
 	raw: unknown,
-): ExtractedInsight[] | null {
+): { insights: ExtractedInsight[]; dropped: number } | null {
 	let insights = raw;
 
 	// Observed, not hypothetical: the model occasionally serializes the array
 	// as a JSON-encoded string within an otherwise well-formed tool call
-	// (stop_reason is a clean "tool_use", not a truncation) — recover that
-	// specific, common shape rather than failing a batch over it, but still
-	// fully validate the result below before trusting it either way.
-	if (typeof insights === "string") {
+	// (stop_reason is a clean "tool_use", not a truncation). Twice, because
+	// double-encoding has been seen too. `strict` on the tool should prevent
+	// this shape from arriving at all now; this stays as the belt to that
+	// braces, since the cost of being wrong here is losing someone's pages.
+	for (let i = 0; i < 2 && typeof insights === "string"; i++) {
 		try {
 			insights = JSON.parse(insights);
 		} catch {
-			// Falls through to the shape check, which rejects it either way.
+			return null;
 		}
 	}
 
-	if (!Array.isArray(insights) || !insights.every(isWellFormedInsight)) {
-		return null;
+	if (!Array.isArray(insights)) return null;
+
+	const kept = insights.filter(isWellFormedInsight);
+	const dropped = insights.length - kept.length;
+
+	// An empty list is a real, valid answer ("nothing meaningful in this
+	// entry"), but an array where every single item was rejected is a
+	// malformed response — say so, so the caller retries.
+	if (kept.length === 0 && insights.length > 0) return null;
+
+	return { insights: kept, dropped };
+}
+
+/**
+ * Why a response was rejected, in enough detail to fix it, without ever
+ * logging the model's actual output — that output is derived from the user's
+ * own journal text. Field names and counts only, never values.
+ */
+export function describeInsightsFailure(raw: unknown): string {
+	let value = raw;
+	if (typeof value === "string") {
+		try {
+			value = JSON.parse(value);
+		} catch {
+			return "string that is not valid JSON";
+		}
+		if (!Array.isArray(value)) return `string parsed to ${typeof value}`;
 	}
-	return insights;
+	if (!Array.isArray(value)) return `${typeof value}, not an array`;
+
+	const reasons: string[] = [];
+	for (const item of value) {
+		if (typeof item !== "object" || item === null) {
+			reasons.push(typeof item);
+			continue;
+		}
+		const { category, label, value: v } = item as Record<string, unknown>;
+		if (typeof category !== "string") reasons.push("category not a string");
+		else if (!(INSIGHT_CATEGORIES as readonly string[]).includes(category))
+			reasons.push("category outside the enum");
+		if (typeof label !== "string") reasons.push("label missing");
+		if (typeof v !== "string") reasons.push("value missing");
+	}
+	const counts = new Map<string, number>();
+	for (const r of reasons) counts.set(r, (counts.get(r) ?? 0) + 1);
+	const detail = [...counts].map(([reason, n]) => `${n}x ${reason}`).join(", ");
+	return `array(${value.length}), all rejected: ${detail || "unknown"}`;
 }
 
 function isWellFormedInsight(item: unknown): item is ExtractedInsight {

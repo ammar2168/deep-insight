@@ -14,7 +14,7 @@ import {
 	SpinnerIcon,
 } from "@/app/_components/day-capture";
 import { errorMessage } from "@/lib/error-message";
-import { api } from "@/trpc/react";
+import { api, type RouterOutputs } from "@/trpc/react";
 
 const MAX_PHOTOS = 50;
 
@@ -136,7 +136,14 @@ function resolveFilenameDate(filename: string): string | null {
 type PhotoItem = { photo: Photo; text: string; date: string | null };
 
 type GroupResult =
-	| { date: string; status: "saved"; insightCount: number; manualDate: boolean }
+	| {
+			date: string;
+			status: "saved";
+			insightCount: number;
+			manualDate: boolean;
+			/** Saved, but the insight step failed — the page itself is safe. */
+			insightsFailed: boolean;
+	  }
 	| { date: string; status: "failed"; reason: string };
 
 type Phase =
@@ -315,15 +322,30 @@ export default function BatchCapturePage() {
 			const text = texts.join("\n\n");
 			let result: GroupResult;
 			try {
-				const { insights } = await extractInsightsMutation.mutateAsync({
-					text,
-				});
+				// The page is the thing that must not be lost; insights are
+				// derived and can be regenerated, the photo can't. These used to
+				// share one try/catch, so a failed insight step discarded an
+				// entry that had already been read successfully — a real prod
+				// incident where 50 pages became 2 saved days. Now only the
+				// insights are allowed to come back empty.
+				let insights: RouterOutputs["entry"]["extractInsights"]["insights"] =
+					[];
+				let insightsFailed = false;
+				try {
+					const extracted = await extractInsightsMutation.mutateAsync({
+						text,
+					});
+					insights = extracted.insights;
+				} catch {
+					insightsFailed = true;
+				}
 				await saveMutation.mutateAsync({ text, entryDate: date, insights });
 				result = {
 					date,
 					status: "saved",
 					insightCount: insights.length,
 					manualDate,
+					insightsFailed,
 				};
 			} catch (err) {
 				result = {
@@ -604,6 +626,9 @@ function SummaryPanel({
 	const manualCount = saved.filter(
 		(r) => r.status === "saved" && r.manualDate,
 	).length;
+	const noInsightCount = saved.filter(
+		(r) => r.status === "saved" && r.insightsFailed,
+	).length;
 
 	return (
 		<section className="rounded-sm bg-paper-100 p-6 text-ink-900 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.6)] sm:p-8">
@@ -615,7 +640,12 @@ function SummaryPanel({
 					`${manualCount} needed a date you entered yourself. `}
 				{skipped.length > 0 &&
 					`${skipped.length} ${skipped.length === 1 ? "page" : "pages"} couldn't be read and ${skipped.length === 1 ? "was" : "were"} skipped. `}
-				{failed.length === 0 && manualCount === 0 && skipped.length === 0
+				{noInsightCount > 0 &&
+					`${noInsightCount} ${noInsightCount === 1 ? "day was" : "days were"} saved without insights — the writing is safe, so nothing is lost. `}
+				{failed.length === 0 &&
+				manualCount === 0 &&
+				skipped.length === 0 &&
+				noInsightCount === 0
 					? "Every page came through cleanly."
 					: null}
 			</p>
