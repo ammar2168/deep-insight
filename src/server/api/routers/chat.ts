@@ -6,7 +6,7 @@ import { answerQuestion } from "@/server/ai/insights";
 import { checkForCrisisSignal } from "@/server/ai/safety";
 import { consentedProcedure, createTRPCRouter } from "@/server/api/trpc";
 import { decryptManyForUser } from "@/server/crypto/envelope";
-import { insights } from "@/server/db/schema";
+import { entries, insights } from "@/server/db/schema";
 
 const CONTEXT_INSIGHT_LIMIT = 50;
 
@@ -53,11 +53,23 @@ export const chatRouter = createTRPCRouter({
 				};
 			}
 
-			const recentInsights = await ctx.db.query.insights.findMany({
-				where: eq(insights.userId, ctx.session.user.id),
-				orderBy: desc(insights.createdAt),
-				limit: CONTEXT_INSIGHT_LIMIT,
-			});
+			// "Recent" has to mean recently written, not recently uploaded.
+			// Ordering by insights.createdAt meant that backfilling a stack of
+			// old pages handed the model fifty insights from years ago as though
+			// they were the latest news — and dated them by upload day, so every
+			// one of them looked like it happened today.
+			const recentInsights = await ctx.db
+				.select({
+					label: insights.label,
+					value: insights.value,
+					entryDate: entries.entryDate,
+				})
+				.from(insights)
+				.innerJoin(entries, eq(insights.entryId, entries.id))
+				.where(eq(insights.userId, ctx.session.user.id))
+				.orderBy(desc(entries.entryDate), desc(insights.createdAt))
+				.limit(CONTEXT_INSIGHT_LIMIT);
+
 			const decryptedValues = await decryptManyForUser(
 				ctx.session.user.id,
 				recentInsights.map((insight) => insight.value),
