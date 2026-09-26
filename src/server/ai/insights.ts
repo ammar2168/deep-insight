@@ -465,17 +465,14 @@ function buildAnalyzeTrendTool(userId: string): ToolDefinition {
 export async function answerQuestion(
 	userId: string,
 	question: string,
-	insights: { label: string; value: string; createdAt: Date }[],
+	insights: { label: string; value: string; entryDate: string }[],
 	history: { question: string; answer: string }[],
 ): Promise<string> {
 	const insightContext =
 		insights.length === 0
 			? "(No insights recorded yet.)"
 			: insights
-					.map(
-						(i) =>
-							`- [${i.createdAt.toISOString().slice(0, 10)}] ${i.label}: ${i.value}`,
-					)
+					.map((i) => `- [${i.entryDate}] ${i.label}: ${i.value}`)
 					.join("\n");
 
 	const historyMessages = history.flatMap(

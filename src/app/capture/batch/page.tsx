@@ -13,6 +13,11 @@ import {
 	PhotoPicker,
 	SpinnerIcon,
 } from "@/app/_components/day-capture";
+import {
+	type DateFailure,
+	groupConsecutiveByDate,
+	resolveEntryDate,
+} from "@/lib/entry-date";
 import { errorMessage } from "@/lib/error-message";
 import { api, type RouterOutputs } from "@/trpc/react";
 
@@ -34,117 +39,33 @@ function BackIcon() {
 	);
 }
 
-/**
- * Looks for an unambiguous YYYY-MM-DD (or YYYYMMDD / YYYY_MM_DD) date
- * anywhere in a filename. A locale-dependent numeric order (03-04-2024) is
- * too ambiguous to guess at silently, so that still falls through — but a
- * month-name filename is handled by resolveFilenameDate below, which tries
- * this first and falls back to the same casual parser quick entry uses.
- */
-function parseFilenameDate(filename: string): string | null {
-	const match = filename.match(/(\d{4})[-_]?(\d{2})[-_]?(\d{2})/);
-	if (!match) return null;
-	const [, year, month, day] = match;
-	// biome-ignore lint/style/noNonNullAssertion: the regex guarantees these three groups
-	const iso = `${year}-${month}-${day!}`;
-	const asDate = new Date(`${iso}T00:00:00Z`);
-	const isReal =
-		asDate.getUTCFullYear() === Number(year) &&
-		asDate.getUTCMonth() === Number(month) - 1 &&
-		asDate.getUTCDate() === Number(day);
-	return isReal ? iso : null;
-}
-
-const MONTH_NAMES: Record<string, number> = {
-	jan: 0,
-	feb: 1,
-	mar: 2,
-	apr: 3,
-	may: 4,
-	jun: 5,
-	jul: 6,
-	aug: 7,
-	sep: 8,
-	oct: 9,
-	nov: 10,
-	dec: 11,
+type PhotoItem = {
+	photo: Photo;
+	text: string;
+	date: string | null;
+	/** Why there's no date, so the question asked can say which problem it is. */
+	reason: DateFailure | null;
 };
-
-/**
- * Turns a casually-typed date ("Sep 3", "3 Sept", "September 3rd, 2024") into
- * YYYY-MM-DD, for the one field where correctness matters most — a date the
- * app couldn't determine on its own. Never guesses a year silently beyond the
- * same rule the server already applies to dates read off the page itself: no
- * year given means the most recent occurrence, not the current year outright.
- * Returns null on anything it isn't confident about, on purpose — the caller
- * always shows the result back before it's ever saved, it's never applied
- * without that.
- */
-function parseCasualDate(
-	raw: string,
-	referenceDate: Date = new Date(),
-): string | null {
-	const trimmed = raw.trim();
-	const monthFirst = trimmed.match(
-		/^([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?$/,
-	);
-	const dayFirst = trimmed.match(
-		/^(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?(?:,?\s+(\d{4}))?$/,
-	);
-	const match = monthFirst ?? dayFirst;
-	if (!match) return null;
-
-	const monthStr = monthFirst ? monthFirst[1] : dayFirst?.[2];
-	const dayStr = monthFirst ? monthFirst[2] : dayFirst?.[1];
-	const yearStr = monthFirst ? monthFirst[3] : dayFirst?.[3];
-	if (!monthStr || !dayStr) return null;
-
-	const month = MONTH_NAMES[monthStr.slice(0, 3).toLowerCase()];
-	if (month === undefined) return null;
-	const day = Number(dayStr);
-	if (day < 1 || day > 31) return null;
-
-	let year = yearStr ? Number(yearStr) : referenceDate.getUTCFullYear();
-	if (!yearStr && Date.UTC(year, month, day) > referenceDate.getTime()) {
-		year -= 1;
-	}
-
-	const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-	const asDate = new Date(`${iso}T00:00:00Z`);
-	const isReal =
-		asDate.getUTCFullYear() === year &&
-		asDate.getUTCMonth() === month &&
-		asDate.getUTCDate() === day;
-	return isReal ? iso : null;
-}
-
-/**
- * The one function the pipeline actually calls for a filename: strict ISO
- * first, then the same casual parser quick entry uses, against the filename
- * with its extension stripped and separators normalized to spaces — so
- * "2024-09-02.jpg" and "2 Sep 2024.jpg" both resolve, matching the two
- * examples shown to the user, but "vacation_photo_final.jpg" correctly finds
- * nothing rather than guessing at a fragment.
- */
-function resolveFilenameDate(filename: string): string | null {
-	const strict = parseFilenameDate(filename);
-	if (strict) return strict;
-	const withoutExtension = filename.replace(/\.[^.]+$/, "");
-	return parseCasualDate(withoutExtension.replace(/[-_]+/g, " "));
-}
-
-type PhotoItem = { photo: Photo; text: string; date: string | null };
 
 type GroupResult =
 	| {
+			/** Stable across renders; two entries can share one date. */
+			id: string;
 			date: string;
 			status: "saved";
+			pageCount: number;
 			insightCount: number;
 			manualDate: boolean;
 			/** Saved, but the insight step failed — the page itself is safe. */
 			insightsFailed: boolean;
 	  }
-	| { date: string; status: "failed"; reason: string };
+	| {
+			id: string;
+			date: string;
+			status: "failed";
+			pageCount: number;
+			reason: string;
+	  };
 
 type Phase =
 	| { kind: "select" }
@@ -155,20 +76,62 @@ type Phase =
 			position: number;
 			total: number;
 			suggestion: string | null;
+			/** Already banked before this question was asked. */
+			savedPages: number;
+			savedDays: number;
 	  }
-	| { kind: "summary"; results: GroupResult[]; skipped: string[] };
+	| {
+			kind: "summary";
+			results: GroupResult[];
+			skipped: string[];
+			totalPages: number;
+			manualPages: number;
+	  };
 
 /**
- * Three passes over the same photos, rather than one pass that decides
- * everything inline:
- *   1. Read every photo (OCR), trying a date from its filename, then its own
- *      content — never blocking the pass on one ambiguous photo.
- *   2. Resolve whatever photos didn't get a date, one at a time, in order.
- *      No page is ever silently assumed to continue the previous one; if the
- *      date can't be determined, the user is asked, always.
- *   3. Now that every photo has a real date, group consecutive same-date
- *      photos into one entry and save — identical logic to a pre-grouped day.
+ * Three passes, in this order for a reason:
+ *   1. Read every page. Nothing blocks — one unreadable or undated page can't
+ *      hold up the other forty-nine.
+ *   2. Save every page that already knows its own date, grouping consecutive
+ *      pages that share one into a single entry.
+ *   3. Only then ask about whatever's left, with the totals already banked so
+ *      the question arrives as "42 pages saved, 8 need a date" rather than an
+ *      interrogation before anything has happened.
+ *
+ * A page's date comes from the page itself first and its filename second (see
+ * src/lib/entry-date.ts), and is never inferred from a neighbouring page.
  */
+/** Narrows to pages that actually have a date, without a non-null assertion. */
+function datedPagesOf(items: PhotoItem[]): { date: string; text: string }[] {
+	return items.flatMap((item) =>
+		item.date === null ? [] : [{ date: item.date, text: item.text }],
+	);
+}
+
+function savedPagesIn(results: GroupResult[]): number {
+	return results.reduce(
+		(total, r) => (r.status === "saved" ? total + r.pageCount : total),
+		0,
+	);
+}
+
+function savedDaysIn(results: GroupResult[]): number {
+	return results.filter((r) => r.status === "saved").length;
+}
+
+/**
+ * The nearest already-dated page before this one, offered as a pre-fill only.
+ * Multi-page entries often only date the first page, so it's usually right —
+ * but it is shown and confirmed, never applied on its own.
+ */
+function suggestionFor(items: PhotoItem[], item: PhotoItem): string | null {
+	for (let i = items.indexOf(item) - 1; i >= 0; i--) {
+		const date = items[i]?.date;
+		if (date) return date;
+	}
+	return null;
+}
+
 export default function BatchCapturePage() {
 	const [photos, setPhotos] = useState<Photo[]>([]);
 	const [phase, setPhase] = useState<Phase>({ kind: "select" });
@@ -212,15 +175,26 @@ export default function BatchCapturePage() {
 		position: number,
 		total: number,
 		suggestion: string | null,
+		savedPages: number,
+		savedDays: number,
 	): Promise<string> {
 		return new Promise((resolve) => {
 			dateResolveRef.current = resolve;
-			setPhase({ kind: "need-date", item, position, total, suggestion });
+			setPhase({
+				kind: "need-date",
+				item,
+				position,
+				total,
+				suggestion,
+				savedPages,
+				savedDays,
+			});
 		});
 	}
 
 	function submitManualDate(date: string) {
-		setPhase({ kind: "processing", stage: "reading" });
+		// No phase change here: the loop either shows the next question or
+		// moves on to saving, so there's nothing to flash in between.
 		dateResolveRef.current?.(date);
 		dateResolveRef.current = null;
 	}
@@ -241,143 +215,130 @@ export default function BatchCapturePage() {
 	async function runPipeline() {
 		setPhase({ kind: "processing", stage: "reading" });
 		setCompleted([]);
+		const today = getLocalDateString();
 		const items: PhotoItem[] = [];
 		const skipped: string[] = [];
 
-		// Pass 1: read every photo, no blocking on an undetermined date.
+		// Pass 1 — read every page.
 		for (let i = 0; i < photos.length; i++) {
 			// biome-ignore lint/style/noNonNullAssertion: i is always a valid index into photos
 			const photo = photos[i]!;
 			setProgress({ current: i + 1, total: photos.length });
 
-			let text: string;
-			let mentionedDates: { rawText: string; resolvedDate: string }[];
-			let crisis: boolean;
+			let ocr: RouterOutputs["entry"]["extractText"];
 			try {
 				const base64 = await fileToCompressedDataUrl(photo.file);
-				const ocr = await extractTextMutation.mutateAsync({
+				ocr = await extractTextMutation.mutateAsync({
 					photos: [{ base64, mediaType: "image/jpeg" }],
 				});
-				text = ocr.text;
-				mentionedDates = ocr.mentionedDates;
-				crisis = ocr.crisis;
 			} catch {
 				skipped.push(photo.name);
 				continue;
 			}
 
-			if (crisis) {
+			if (ocr.crisis) {
 				await waitForCrisisContinue();
 			}
 
-			const date =
-				resolveFilenameDate(photo.name) ??
-				mentionedDates[0]?.resolvedDate ??
-				null;
-			items.push({ photo, text, date });
+			const resolution = resolveEntryDate({
+				mentionedDates: ocr.mentionedDates,
+				filename: photo.name,
+				today,
+			});
+			items.push({
+				photo,
+				text: ocr.text,
+				date: resolution.date,
+				reason: resolution.reason ?? null,
+			});
 		}
 
-		// Pass 2: resolve whatever couldn't be determined, one at a time. The
-		// nearest earlier resolved date is offered as a pre-filled suggestion
-		// (multi-page entries often don't repeat the date on every page) but
-		// it's never applied without the user seeing and confirming it.
-		const undatedIndices = items
-			.map((_item, index) => index)
-			.filter((index) => items[index]?.date === null);
-		const manualIndices = new Set<number>();
+		const results: GroupResult[] = [];
 
-		for (let n = 0; n < undatedIndices.length; n++) {
-			// biome-ignore lint/style/noNonNullAssertion: n is always a valid index into undatedIndices
-			const index = undatedIndices[n]!;
-			// biome-ignore lint/style/noNonNullAssertion: index came from items itself
-			const item = items[index]!;
-			const suggestion =
-				items
-					.slice(0, index)
-					.reverse()
-					.find((it) => it.date !== null)?.date ?? null;
+		/**
+		 * Groups consecutive pages sharing a date into one entry and saves it.
+		 * Insight extraction is deliberately inside its own try: a page that was
+		 * read successfully is never discarded because insights failed.
+		 */
+		async function saveGrouped(
+			list: { date: string; text: string }[],
+			manualDate: boolean,
+		) {
+			for (const group of groupConsecutiveByDate(list)) {
+				const { date } = group;
+				const texts = group.items.map((item) => item.text);
+				const text = texts.join("\n\n");
+				const id = `${date}#${results.length}`;
+				let result: GroupResult;
+				try {
+					let insights: RouterOutputs["entry"]["extractInsights"]["insights"] =
+						[];
+					let insightsFailed = false;
+					try {
+						const extracted = await extractInsightsMutation.mutateAsync({
+							text,
+						});
+						insights = extracted.insights;
+					} catch {
+						insightsFailed = true;
+					}
+					await saveMutation.mutateAsync({ text, entryDate: date, insights });
+					result = {
+						id,
+						date,
+						status: "saved",
+						pageCount: texts.length,
+						insightCount: insights.length,
+						manualDate,
+						insightsFailed,
+					};
+				} catch (err) {
+					result = {
+						id,
+						date,
+						status: "failed",
+						pageCount: texts.length,
+						reason: errorMessage(err, "Something went wrong saving this one."),
+					};
+				}
+				results.push(result);
+				setCompleted((prev) => [...prev, result]);
+			}
+		}
+
+		// Pass 2 — bank everything that already knows its date.
+		setPhase({ kind: "processing", stage: "saving" });
+		await saveGrouped(datedPagesOf(items), false);
+
+		// Pass 3 — now ask about the rest, one at a time, nothing else waiting.
+		const undated = items.filter((item) => item.date === null);
+		const answered: PhotoItem[] = [];
+		for (let n = 0; n < undated.length; n++) {
+			// biome-ignore lint/style/noNonNullAssertion: n is always a valid index into undated
+			const item = undated[n]!;
 			const chosen = await waitForManualDate(
 				item,
 				n + 1,
-				undatedIndices.length,
-				suggestion,
+				undated.length,
+				suggestionFor(items, item),
+				savedPagesIn(results),
+				savedDaysIn(results),
 			);
-			item.date = chosen;
-			manualIndices.add(index);
+			answered.push({ ...item, date: chosen });
 		}
 
-		// Pass 3: every item now has a real date — group consecutive same-date
-		// items into one entry and save.
-		setPhase({ kind: "processing", stage: "saving" });
-		const results: GroupResult[] = [];
-		let currentGroup: {
-			date: string;
-			texts: string[];
-			manualDate: boolean;
-		} | null = null;
-
-		async function finalizeGroup() {
-			if (!currentGroup) return;
-			const { date, texts, manualDate } = currentGroup;
-			const text = texts.join("\n\n");
-			let result: GroupResult;
-			try {
-				// The page is the thing that must not be lost; insights are
-				// derived and can be regenerated, the photo can't. These used to
-				// share one try/catch, so a failed insight step discarded an
-				// entry that had already been read successfully — a real prod
-				// incident where 50 pages became 2 saved days. Now only the
-				// insights are allowed to come back empty.
-				let insights: RouterOutputs["entry"]["extractInsights"]["insights"] =
-					[];
-				let insightsFailed = false;
-				try {
-					const extracted = await extractInsightsMutation.mutateAsync({
-						text,
-					});
-					insights = extracted.insights;
-				} catch {
-					insightsFailed = true;
-				}
-				await saveMutation.mutateAsync({ text, entryDate: date, insights });
-				result = {
-					date,
-					status: "saved",
-					insightCount: insights.length,
-					manualDate,
-					insightsFailed,
-				};
-			} catch (err) {
-				result = {
-					date,
-					status: "failed",
-					reason: errorMessage(err, "Something went wrong saving this one."),
-				};
-			}
-			results.push(result);
-			setCompleted((prev) => [...prev, result]);
-			currentGroup = null;
+		if (answered.length > 0) {
+			setPhase({ kind: "processing", stage: "saving" });
+			await saveGrouped(datedPagesOf(answered), true);
 		}
 
-		for (let i = 0; i < items.length; i++) {
-			// biome-ignore lint/style/noNonNullAssertion: i is always a valid index into items
-			const item = items[i]!;
-			// biome-ignore lint/style/noNonNullAssertion: every item's date is resolved by pass 2
-			const date = item.date!;
-			if (currentGroup && currentGroup.date === date) {
-				currentGroup.texts.push(item.text);
-			} else {
-				await finalizeGroup();
-				currentGroup = {
-					date,
-					texts: [item.text],
-					manualDate: manualIndices.has(i),
-				};
-			}
-		}
-		await finalizeGroup();
-
-		setPhase({ kind: "summary", results, skipped });
+		setPhase({
+			kind: "summary",
+			results,
+			skipped,
+			totalPages: photos.length,
+			manualPages: undated.length,
+		});
 	}
 
 	const canProcess = photos.length > 0 && photos.length <= MAX_PHOTOS;
@@ -427,13 +388,15 @@ export default function BatchCapturePage() {
 									For the smoothest results
 								</p>
 								<p className="text-ink-600 text-sm">
-									Write the date somewhere on each page you photograph.
+									Write the date somewhere on each page you photograph. That's
+									the first thing we look for, and the most reliable.
 								</p>
 								<p className="text-ink-600 text-sm">
-									Or name the file with the date —{" "}
+									A filename works too, if you chose it yourself —{" "}
 									<span className="font-mono text-ink-900">2024-09-02</span> or
-									"2 Sep 2024" both work — the same date on every page from that
-									day.
+									"2 Sep 2024". Names your camera picked, like{" "}
+									<span className="font-mono text-ink-900">IMG_20260925</span>,
+									only record when the photo was taken, so we ignore them.
 								</p>
 							</div>
 
@@ -492,10 +455,7 @@ export default function BatchCapturePage() {
 						{completed.length > 0 && (
 							<ul className="mt-6 flex flex-col gap-1.5 border-indigo-500/20 border-t pt-4">
 								{completed.map((r) => (
-									<li
-										className="text-ink-600 text-sm"
-										key={`${r.date}-${r.status}`}
-									>
+									<li className="text-ink-600 text-sm" key={r.id}>
 										{formatEntryDate(r.date)} —{" "}
 										{r.status === "saved" ? (
 											<span className="text-ink-900">
@@ -518,13 +478,20 @@ export default function BatchCapturePage() {
 						key={phase.item.photo.id}
 						onSubmit={submitManualDate}
 						position={phase.position}
+						savedDays={phase.savedDays}
+						savedPages={phase.savedPages}
 						suggestion={phase.suggestion}
 						total={phase.total}
 					/>
 				)}
 
 				{phase.kind === "summary" && (
-					<SummaryPanel results={phase.results} skipped={phase.skipped} />
+					<SummaryPanel
+						manualPages={phase.manualPages}
+						results={phase.results}
+						skipped={phase.skipped}
+						totalPages={phase.totalPages}
+					/>
 				)}
 			</div>
 
@@ -540,12 +507,16 @@ function NeedDateCard({
 	position,
 	total,
 	suggestion,
+	savedPages,
+	savedDays,
 	onSubmit,
 }: {
 	item: PhotoItem;
 	position: number;
 	total: number;
 	suggestion: string | null;
+	savedPages: number;
+	savedDays: number;
 	onSubmit: (date: string) => void;
 }) {
 	const [date, setDate] = useState(suggestion ?? "");
@@ -562,7 +533,11 @@ function NeedDateCard({
 				What date is this page?
 			</h2>
 			<p className="mt-1 text-ink-600 text-sm">
-				We couldn't find a date on it, in its content or its filename.
+				{savedPages > 0 &&
+					`${savedPages} ${savedPages === 1 ? "page is" : "pages are"} already saved across ${savedDays} ${savedDays === 1 ? "day" : "days"}. `}
+				{item.reason === "ambiguous-page"
+					? "This page names more than one date, so we won't choose between them."
+					: "We couldn't find a date written on the page, and its filename isn't one you chose."}
 			</p>
 
 			<div className="mt-4 flex flex-col gap-4 sm:flex-row">
@@ -617,38 +592,62 @@ function NeedDateCard({
 function SummaryPanel({
 	results,
 	skipped,
+	totalPages,
+	manualPages,
 }: {
 	results: GroupResult[];
 	skipped: string[];
+	totalPages: number;
+	manualPages: number;
 }) {
 	const saved = results.filter((r) => r.status === "saved");
 	const failed = results.filter((r) => r.status === "failed");
-	const manualCount = saved.filter(
-		(r) => r.status === "saved" && r.manualDate,
-	).length;
+	const savedPages = savedPagesIn(results);
+	const failedPages = results.reduce(
+		(total, r) => (r.status === "failed" ? total + r.pageCount : total),
+		0,
+	);
 	const noInsightCount = saved.filter(
 		(r) => r.status === "saved" && r.insightsFailed,
 	).length;
+	// A page dated by hand can land on a day that was already saved, which is
+	// a second entry for that date — real, but one day, not two.
+	const distinctDays = new Set(saved.map((r) => r.date)).size;
+
+	// Pages in, pages out, and every exception named. The old summary counted
+	// only days, so a run where 50 pages collapsed into one day reported
+	// "every page came through cleanly" — true by its own definition, and
+	// useless for noticing that something had gone wrong.
+	const notes = [
+		manualPages > 0 &&
+			`${manualPages} ${manualPages === 1 ? "page" : "pages"} you dated yourself`,
+		skipped.length > 0 &&
+			`${skipped.length} ${skipped.length === 1 ? "page" : "pages"} couldn't be read`,
+		failedPages > 0 &&
+			`${failedPages} ${failedPages === 1 ? "page" : "pages"} couldn't be saved`,
+		noInsightCount > 0 &&
+			`${noInsightCount} ${noInsightCount === 1 ? "day" : "days"} saved without insights — the writing is safe`,
+	].filter((note): note is string => typeof note === "string");
 
 	return (
 		<section className="rounded-sm bg-paper-100 p-6 text-ink-900 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.6)] sm:p-8">
 			<h2 className="font-semibold text-2xl text-ink-900">
-				{saved.length} {saved.length === 1 ? "day" : "days"} added
+				{savedPages} of {totalPages} {totalPages === 1 ? "page" : "pages"} saved
+				across {distinctDays} {distinctDays === 1 ? "day" : "days"}
 			</h2>
-			<p className="mt-1 text-ink-600 text-sm">
-				{manualCount > 0 &&
-					`${manualCount} needed a date you entered yourself. `}
-				{skipped.length > 0 &&
-					`${skipped.length} ${skipped.length === 1 ? "page" : "pages"} couldn't be read and ${skipped.length === 1 ? "was" : "were"} skipped. `}
-				{noInsightCount > 0 &&
-					`${noInsightCount} ${noInsightCount === 1 ? "day was" : "days were"} saved without insights — the writing is safe, so nothing is lost. `}
-				{failed.length === 0 &&
-				manualCount === 0 &&
-				skipped.length === 0 &&
-				noInsightCount === 0
-					? "Every page came through cleanly."
-					: null}
-			</p>
+			{notes.length > 0 ? (
+				<ul className="mt-2 flex flex-col gap-1">
+					{notes.map((note) => (
+						<li className="text-ink-600 text-sm" key={note}>
+							{note}
+						</li>
+					))}
+				</ul>
+			) : (
+				<p className="mt-1 text-ink-600 text-sm">
+					Every page carried its own date and came through cleanly.
+				</p>
+			)}
 
 			{failed.length > 0 && (
 				<div className="mt-4 flex flex-col gap-1.5 border-indigo-500/20 border-t pt-4">
@@ -656,7 +655,7 @@ function SummaryPanel({
 						Needs another look
 					</p>
 					{failed.map((r) => (
-						<p className="text-ink-600 text-sm" key={r.date}>
+						<p className="text-ink-600 text-sm" key={r.id}>
 							{formatEntryDate(r.date)} — {r.reason}
 						</p>
 					))}

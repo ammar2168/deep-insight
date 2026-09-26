@@ -10,7 +10,12 @@ export const insightRouter = createTRPCRouter({
 	latest: consentedProcedure.query(async ({ ctx }) => {
 		const latestEntry = await ctx.db.query.entries.findFirst({
 			where: eq(entries.userId, ctx.session.user.id),
-			orderBy: desc(entries.createdAt),
+			// entryDate is the day the writing is about; createdAt is the moment
+			// the row was saved. Ordering by createdAt meant uploading last
+			// week's page today pushed it to the top of the home page, above an
+			// entry actually written today. createdAt only breaks ties now,
+			// between two entries that genuinely share a calendar date.
+			orderBy: [desc(entries.entryDate), desc(entries.createdAt)],
 		});
 
 		if (!latestEntry) return [];

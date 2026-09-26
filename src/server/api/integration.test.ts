@@ -157,3 +157,49 @@ describe("beta access gate, through the real procedure chain", () => {
 		});
 	});
 });
+
+describe("what counts as the latest entry, against a real database", () => {
+	const userId = `integration-latest-${randomUUID()}`;
+	const caller = createCaller(contextFor(userId));
+
+	beforeAll(async () => {
+		await db.insert(user).values({
+			id: userId,
+			name: "Latest Test",
+			email: `${userId}@test.local`,
+		});
+		await db.insert(userAccess).values({ userId });
+		await caller.consent.accept();
+	});
+
+	afterAll(async () => {
+		await caller.settings.deleteAccount().catch(() => {});
+	});
+
+	it("shows the most recently written day, not the most recently uploaded", async () => {
+		// Saved first: a page written recently.
+		await caller.entry.save({
+			text: "The page I wrote this week.",
+			entryDate: "2026-09-20",
+			insights: [
+				{ category: "mood", label: "Recent page", value: "You felt steady." },
+			],
+		});
+
+		// Saved second, so its row is newer — but it was written a month
+		// earlier. Backfilling it must not displace the recent page on the
+		// home screen, which is what ordering by createdAt used to do.
+		await caller.entry.save({
+			text: "A page from last month I never got round to adding.",
+			entryDate: "2026-08-12",
+			insights: [
+				{ category: "mood", label: "Older page", value: "You felt restless." },
+			],
+		});
+
+		const latest = await caller.insight.latest();
+		const labels = latest.map((insight) => insight.label);
+		expect(labels).toContain("Recent page");
+		expect(labels).not.toContain("Older page");
+	});
+});
