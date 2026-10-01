@@ -25,9 +25,6 @@ jobs:
     env:
       SKIP_ENV_VALIDATION: true
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/journalling_app_test
-      # Throwaway — scoped to a Postgres container that's destroyed at the end
-      # of this job, protects nothing real. Not the same key as dev or prod.
-      MASTER_ENCRYPTION_KEY: "+pmaIMe0PdM8gqVrekcdICv9kvq59/FoWF+E4w0NeDo="
     steps:
       - uses: actions/checkout@v4
 
@@ -39,6 +36,14 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      # Minted per run rather than committed. It only ever unlocks the
+      # throwaway Postgres container above, so the old hardcoded value
+      # protected nothing — but a key sitting in a repository invites the
+      # question of whether it is a real one, and the answer should be
+      # obvious without having to trust a comment.
+      - name: Mint a throwaway encryption key for this run
+        run: echo "MASTER_ENCRYPTION_KEY=$(openssl rand -base64 32)" >> "$GITHUB_ENV"
 
       - run: pnpm typecheck
 

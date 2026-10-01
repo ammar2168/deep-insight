@@ -53,3 +53,9 @@ yarn-error.log*
 .impeccable/hook.cache.json
 .impeccable/questions/
 .env*
+
+# local prototypes and scratch work
+.spike/
+
+# third-party tooling vendored into the working copy, not part of this project
+.claude/skills/
